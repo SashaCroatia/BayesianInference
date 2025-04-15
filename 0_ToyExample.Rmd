@@ -140,7 +140,7 @@ for (i in 2:N) {
     
     #2) Compute transition probability
     P_list[i] <- logistic_ll(b_prop, X, y)+log_prior_uniform(b_prop)  #P(beta*)
-    while (is.nan(P_prop)) {
+    while (is.nan(P_list[i])) {
       b_prop <- proposal(i, M, b, a)
       P_list[i] <- logistic_ll(b_prop, X, y)+log_prior_uniform(b_prop)  #P(beta*)
     }
@@ -235,7 +235,7 @@ for (j in seq(1,k)) {
         
         #2) Compute transition probability
         P_list[i] <- logistic_ll(b_prop, parts_X$`1`, parts_y$`1`)+log_prior_uniform(b_prop)  #P(beta*)
-        while (is.nan(P_prop)) {
+        while (is.nan(P_list[i])) {
           b_prop <- proposal(i, M, b, a)
           P_list[i] <- logistic_ll(b_prop, parts_X$`1`, parts_y$`1`)+log_prior_uniform(b_prop)  #P(beta*)
         }
@@ -300,7 +300,7 @@ for (j in seq(1,k)) {
         
         #2) Compute transition probability
         P_list[i] <- logistic_ll(b_prop, parts_X[[j]], parts_y[[j]])+log_prior(b_prop)  #P(beta*)
-        while (is.nan(P_prop)) {
+        while (is.nan(P_list[i])) {
           b_prop <- proposal(i, M, b, a)
           P_list[i] <- logistic_ll(b_prop, parts_X[[j]], parts_y[[j]])+log_prior(b_prop)  #P(beta*)
         }
@@ -375,7 +375,7 @@ for (j in seq(1,k)) {
         
         #2) Compute transition probability
         P_list[i] <- logistic_ll(b_prop, parts_X$`1`, parts_y$`1`) #P(beta*)
-        while (is.nan(P_prop)) {
+        while (is.nan(P_list[i])) {
           b_prop <- proposal(i, M, b, a)
           P_list[i] <- logistic_ll(b_prop, parts_X$`1`, parts_y$`1`) #P(beta*)
         }
