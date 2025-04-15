@@ -26,7 +26,7 @@ $$
 
 Reference: [https://web.stanford.edu/~jurafsky/slp3/5.pdf](https://web.stanford.edu/~jurafsky/slp3/5.pdf)
 ```{r}
-n = 200 #number of observations (set it higher for consistency)
+n = 400 #number of observations (set it higher for consistency)
 p = 1 #number of predictors
 
 X <- cbind(1, matrix(rnorm(n * p), n, p))  # Design matrix with intercept (bias). nxp
@@ -116,9 +116,9 @@ logistic_ll <- function(beta, X, y) {
   return(loglike)
 }
 
-# Log-prior of unknown parameter
-log_prior <- function(beta) {
-  prior = 1
+# Uniform Log-prior of unknown parameter
+log_prior_uniform <- function(beta) {
+  prior = 0
   return(prior)
 }
 ```
@@ -131,20 +131,22 @@ M <- p+1 #dimensions
 b <- matrix(0, nrow = N, ncol = M) #empty matrix to be filled with vals
 b[1,] <- c(0,0)  # first value of beta in the Markov chain is (0,0).
 
+#Keep history of proposals
+P_list <- rep(NA, N - 1)
+P_list[1] = logistic_ll(b[1,], X, y)+log_prior_uniform(b[1])  #P(beta^{i-1})
 for (i in 2:N) {
     #1) Propose new position beta[i-1] -> beta[i]' from proposal distro
     b_prop <- proposal(i, M, b, a)
     
     #2) Compute transition probability
-    P_prop <- logistic_ll(b_prop, X, y)+log_prior(b_prop)  #P(beta*)
+    P_list[i] <- logistic_ll(b_prop, X, y)+log_prior_uniform(b_prop)  #P(beta*)
     while (is.nan(P_prop)) {
       b_prop <- proposal(i, M, b, a)
-      P_prop <- logistic_ll(b_prop, X, y)+log_prior(b_prop)  #P(beta*)
+      P_list[i] <- logistic_ll(b_prop, X, y)+log_prior_uniform(b_prop)  #P(beta*)
     }
-    P_prev <- logistic_ll(b[i-1,], X, y)+log_prior(b[i-1])  #P(beta^{i-1})
     
     #3) Acceptance ratio
-    alpha <- min(exp(P_prop - P_prev), 1)
+    alpha <- min(exp(P_list[i] - P_list[i-1]), 1)
     
     #3) Generate a random number u_i from [0,1]
     u <- runif(1)  # u_i
@@ -190,7 +192,7 @@ ggplot() +
 ## (iii) Implementing a recursive approach in which we consider batches of data in a sequence
 First we partition the dataset
 ```{r}
-#Number of partitions of dataset
+#Number of partitions in dataset
 k <- 4
 
 #Number of rows
@@ -215,33 +217,31 @@ a <- 1 #error in proposal distro
 N <- 10000 #number of samples
 M <- p+1 #dimensions
     
-for (j in range(1,k)) { 
+for (j in seq(1,k)) { 
   if (j == 1) {
+    
     #Iteration j==1
     #====================
-    log_prior <- function(beta) {
-      prior = 1
-      return(prior)
-    }
-    
     #0) Initial values
     b <- matrix(0, nrow = N, ncol = M) #empty matrix to be filled with vals
     b[1,] <- c(0,0)  # first value of beta in the Markov chain is (0,0).
     
+    #Keep history of proposals
+    P_list <- rep(NA, N - 1)
+    P_list[1] = logistic_ll(b[1,], parts_X$`1`, parts_y$`1`)+log_prior_uniform(b[1])  #P(beta^{i-1})
     for (i in 2:N) {
         #1) Propose new position beta[i-1] -> beta[i]' from proposal distro
         b_prop <- proposal(i, M, b, a)
         
         #2) Compute transition probability
-        P_prop <- logistic_ll(b_prop, parts_X$`1`, parts_y$`1`)+log_prior(b_prop)  #P(beta*)
+        P_list[i] <- logistic_ll(b_prop, parts_X$`1`, parts_y$`1`)+log_prior_uniform(b_prop)  #P(beta*)
         while (is.nan(P_prop)) {
           b_prop <- proposal(i, M, b, a)
-          P_prop <- logistic_ll(b_prop, parts_X$`1`, parts_y$`1`)+log_prior(b_prop)  #P(beta*)
+          P_list[i] <- logistic_ll(b_prop, parts_X$`1`, parts_y$`1`)+log_prior_uniform(b_prop)  #P(beta*)
         }
-        P_prev <- logistic_ll(b[i-1,], parts_X$`1`, parts_y$`1`)+log_prior(b[i-1])  #P(beta^{i-1})
         
         #3) Acceptance ratio
-        alpha <- min(exp(P_prop - P_prev), 1)
+        alpha <- min(exp(P_list[i] - P_list[i-1]), 1)
         
         #3) Generate a random number u_i from [0,1]
         u <- runif(1)  # u_i
@@ -257,19 +257,29 @@ for (j in range(1,k)) {
     C <- b[(N - n + 1):N,] #discard first 5% of samples
   
     } else {
+      
     #Iteration j > 1
     #====================
+    #Create KDE functions
+    den_funs <- list()
+    d = 1
+    while (d < dim(C)[2]) {
+      kde <- density(C[,d])
+      den_funs[[d]] <- approxfun(kde$x, kde$y) #approx fun
+      d = d+1
+    }
+    
+    #Define log_prior
     log_prior <- function(beta) {
       prior_d = 1
       d = 1
       while (d < dim(C)[2]) {
-        kde = density(C[,d])
         if ( min(C[,d]) < beta[d] && beta[d] < max(C[,d]) ){
-          density_at_point = approx(kde$x, kde$y, xout = beta[d])
-          prior_d = prior_d * density_at_point$y
+          density_at_point = den_funs[[d]](beta[d])
+          prior_d = prior_d * density_at_point #Assume independence
         }
         else {
-          prior_d = 0
+          prior_d = 1
         }
         d = d+1
       }
@@ -281,20 +291,22 @@ for (j in range(1,k)) {
     b <- matrix(0, nrow = N, ncol = M) #empty matrix to be filled with vals
     b[1,] <- c(0,0)  # first value of beta in the Markov chain is (0,0).
     
+    #Keep history of proposals
+    P_list <- rep(NA, N - 1)
+    P_list[1] <- logistic_ll(b[1,], parts_X[[j]], parts_y[[j]])+log_prior(b[1])  #P(beta^{i-1})
     for (i in 2:N) {
         #1) Propose new position beta[i-1] -> beta[i]' from proposal distro
         b_prop <- proposal(i, M, b, a)
         
         #2) Compute transition probability
-        P_prop <- logistic_ll(b_prop, parts_X[[j]], parts_y[[j]])+log_prior(b_prop)  #P(beta*)
+        P_list[i] <- logistic_ll(b_prop, parts_X[[j]], parts_y[[j]])+log_prior(b_prop)  #P(beta*)
         while (is.nan(P_prop)) {
           b_prop <- proposal(i, M, b, a)
-          P_prop <- logistic_ll(b_prop, parts_X[[j]], parts_y[[j]])+log_prior(b_prop)  #P(beta*)
+          P_list[i] <- logistic_ll(b_prop, parts_X[[j]], parts_y[[j]])+log_prior(b_prop)  #P(beta*)
         }
-        P_prev <- logistic_ll(b[i-1,], parts_X[[j]], parts_y[[j]])+log_prior(b[i-1])  #P(beta^{i-1})
         
         #3) Acceptance ratio
-        alpha <- min(exp(P_prop - P_prev), 1)
+        alpha <- min(exp(P_list[i] - P_list[i-1]), 1)
         
         #3) Generate a random number u_i from [0,1]
         u <- runif(1)  # u_i
@@ -327,7 +339,7 @@ ggplot() +
 $\beta_2$ distro estimate:
 ```{r}
 c = C[,2]
-# Plot of density function
+# Plot of density function. coda? (give samples)
 library(ggplot2)
 nbins <- ceiling( (2*n)**(1/3) ) #Terrell-Scott rule for min num bins
 ggplot() +
@@ -338,33 +350,38 @@ ggplot() +
   theme_minimal()
 ```
 
-**2.2)/2.3) Prior-recursive Bayesian Inference**
+**2.2)/2.3) Prior-proposal recursive Bayesian Inference**
 ```{r}
 #0) Initial values
 a <- 1 #error in proposal distro
 M <- p+1 #dimensions
     
-for (j in range(1,k)) { 
+for (j in seq(1,k)) { 
   if (j == 1) {
+    
+    #Iteration j == 1
+    #====================
     #0) Initial values
     N <- 10000 #number of samples
     b <- matrix(0, nrow = N, ncol = M) #empty matrix to be filled with vals
     b[1,] <- c(0,0)  # first value of beta in the Markov chain is (0,0).
     
+    #Keep history of proposals
+    P_list <- rep(NA, N - 1)
+    P_list[1] <- logistic_ll(b[1,], parts_X$`1`, parts_y$`1`) #P(beta^{i-1})
     for (i in 2:N) {
         #1) Propose new position beta[i-1] -> beta[i]' from proposal distro
         b_prop <- proposal(i, M, b, a)
         
         #2) Compute transition probability
-        P_prop <- logistic_ll(b_prop, parts_X$`1`, parts_y$`1`) #P(beta*)
+        P_list[i] <- logistic_ll(b_prop, parts_X$`1`, parts_y$`1`) #P(beta*)
         while (is.nan(P_prop)) {
           b_prop <- proposal(i, M, b, a)
-          P_prop <- logistic_ll(b_prop, parts_X$`1`, parts_y$`1`) #P(beta*)
+          P_list[i] <- logistic_ll(b_prop, parts_X$`1`, parts_y$`1`) #P(beta*)
         }
-        P_prev <- logistic_ll(b[i-1,], parts_X$`1`, parts_y$`1`) #P(beta^{i-1})
         
         #3) Acceptance ratio
-        alpha <- min(exp(P_prop - P_prev), 1)
+        alpha <- min(exp(P_list[i] - P_list[i-1]), 1)
         
         #3) Generate a random number u_i from [0,1]
         u <- runif(1)  # u_i
@@ -380,24 +397,26 @@ for (j in range(1,k)) {
     C <- b[(N - n + 1):N,] #discard first 5% of samples
     
   } else {
+    
     #Iteration j > 1
     #====================
-    
     #0) Initial values
     N <- dim(C)[1] #number of samples
     b <- matrix(0, nrow = N, ncol = M) #empty matrix to be filled with vals
     b[1,] <- C[1,]  # first value of beta in the Markov chain is (0,0).
     
+    #Keep history of proposals
+    P_list <- rep(NA, N - 1)
+    P_list[1] <- logistic_ll(b[1,], parts_X[[j]], parts_y[[j]]) #P(beta^{i-1})
     for (i in 2:N) {
         #1) Propose new position beta[i-1] -> beta[i]' from proposal distro
         b_prop <- C[i,]
         
         #2) Compute transition probability
-        P_prop <- logistic_ll(b_prop, parts_X[[j]], parts_y[[j]]) #P(beta*)
-        P_prev <- logistic_ll(b[i-1,], parts_X[[j]], parts_y[[j]]) #P(beta^{i-1})
+        P_list[i] <- logistic_ll(b_prop, parts_X[[j]], parts_y[[j]]) #P(beta*)
         
         #3) Acceptance ratio
-        alpha <- min(exp(P_prop - P_prev), 1)
+        alpha <- min(exp(P_list[i] - P_list[i-1]), 1)
         
         #3) Generate a random number u_i from [0,1]
         u <- runif(1)  # u_i
