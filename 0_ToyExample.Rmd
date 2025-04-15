@@ -1,0 +1,427 @@
+---
+title: "Recursive Bayesian Methods"
+author: "Alexander Berliner"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+---
+
+## (i) Simulating Data from a Logistic Regression Model with Synthetic Predictors
+
+Logistic regression is a binary classifier. We want to find the probability that the observation $P(y = 1 \mid \mathbf{x})$ is a member of a class. 
+
+Along with the training set $\mathbf{X}$, we have a vector $\boldsymbol{\beta}$ of weights for each feature, including the intercept. The resulting evidence for the class is given by:
+
+$$
+z = \mathbf{X} \boldsymbol{\beta}
+$$
+
+To convert $z$ into a probability, we pass it through the sigmoid (logistic) function:
+
+$$
+\sigma(z) = \frac{1}{1 + e^{-z}}
+$$
+
+Reference: [https://web.stanford.edu/~jurafsky/slp3/5.pdf](https://web.stanford.edu/~jurafsky/slp3/5.pdf)
+```{r}
+n = 100 #number of observations
+p = 1 #number of predictors
+
+X <- cbind(1, matrix(rnorm(n * p), n, p))  # Design matrix with intercept (bias). nxp
+beta <- c(1, 2)  # True coefficients. px1
+
+z <- X %*% beta  # Linear predictor. %*% = matrix mult. nx1 dim
+sig <- 1/(1+exp(-z)) #sigmoid (inv-logit) function, find probability in [0,1], predicted y
+
+y = rbinom(n=n, size=1, prob=sig) #size=num trials=1 -> bernoulli response var
+
+plot(X[,2],y)
+```
+
+## (ii) Sample from the posterior distribution of the regression coefficients using conventional Bayesian methods.
+
+As our goal is to compute the probability of the model given the data, we use Markov Chain Monte Carlo (MCMC) as our simulation (stochastic) method to obtain random samples of $\beta$.  
+<br>
+
+Some notes:  
+<ul>
+<li> The Bayesian treatment views $\beta$ as a random variable with a prior distribution. In this example, $y\vert\beta\sim F_y$ with unkown parameter coeficients $\beta\sim F_\beta$. If there were external parameters influencing the coefficients, than those parameters would be the hyperparamters. This is inline with the practice of <strong>Bayesian hierarchical modeling</strong>.</li>
+
+<li> Our goal is to find the distribution $p(\beta\vert y, X)$. Bayes' rule for the posterior over the parameters is:  
+$$
+p(\beta\vert y, X) = \frac{p(y\vert X,\beta)p(\beta)}{\int p(y\vert X,\beta)p(\beta)d\beta}
+$$
+where $p(y\vert X,\beta)$ is the likelihood, $p(\beta)$ is the prior, and the denominator is the marginal likelihood. As the integral may not be analytically solvable we resort to MCMC.  
+</li>
+
+<li>  
+<strong>Importance sampling</strong>: used for computing the expectation $E[\beta\vert y, X]$ by drawing from an approximation of the target distribution $p(\beta\vert y,X)$. Let $g(\beta)$ be the pdf of our sampling distribution (ie proposal distribution in MCMC). Then  
+$$
+E[\beta\vert y, X] = \frac{\int\beta\cdot p(y\vert X,\beta)p(\beta)d\beta}{\int p(y\vert X,\beta)p(\beta)d\beta} = 
+\frac{\int [\beta\cdot p(y\vert X,\beta)p(\beta)g(\beta)]/g(\beta) d\beta}{\int [p(y\vert X,\beta)p(\beta)g(\beta)]/g(\beta)d\beta}
+$$
+can be estimated using $S$ draws $\beta^1,\ldots,\beta^2$ from $g(\beta)$ by  
+$$
+\frac{\frac{1}{S}\sum_{s=1}^S\beta^sw(\beta^s)}{\frac{1}{S}\sum_{s=1}^Sw(\beta^s)}
+$$  
+$$
+w(\beta^s) = \frac{p(y\vert X,\beta^s)p(\beta^s)}{g(\beta^s)}
+$$  
+are the importance ratios (weights).  
+</li>
+
+<li>  
+<strong>Markov chain</strong>: sequential sampling, where the last value drawn depends on the previously sampled value; $\beta^{i}$ depends on $\beta^{i-1}$. Choose $\beta^i$ from the transition distribution $T_i(\beta^i\vert\beta^{i-1})$; $i$ is iteration number.  
+</li>
+</ul>  
+
+<br><br>  
+Ref: BDA3 Ch. 10,11  
+
+<br><br>  
+
+<strong>Metropolis algorithm</strong>:  
+<ol>
+<li>  
+State the initial values: $N$ total iterations, $M$ dimensions, and a $N$x$M$ matrix $b$ where the first row is our initial guess $\beta^0 = [\beta_1^0,\ldots,\beta_M^0]$, and the subsequent rows is the sequence of the Markov chain of samples.  
+</li>
+
+<li>  
+At iteration $i$, propose a new sample $\beta_{prop}$ from a symmetric proposal distribution $J_i(\beta^*\vert\beta^{i-1})=J_i(\beta^{i-1}\vert\beta^*)$.  
+</li>
+
+<li>  
+Compute the acceptance ratio at iteration $i$:  
+$$
+r = \frac{P(\beta^*)}{P(\beta^{i-1})} = \frac{p(y\vert X,\beta^*)p(\beta^*)}{p(y\vert X,\beta^{i-1})p(\beta^{i-1})}
+$$  
+</li>
+</ol>
+
+Define initial functions:
+```{r}
+#Proposal distro
+proposal <- function(i, M, beta, a){
+  distro = runif(M, beta[i-1,] - a, beta[i-1,] + a)
+  return(distro)
+}
+
+# Log-likelihood function for logistic regression
+logistic_ll <- function(beta, X, y) {
+  z <- X %*% beta
+  p <- 1 / (1 + exp(-z))
+  loglike <- sum(y * log(p) + (1 - y) * log(1 - p))
+  return(loglike)
+}
+
+# Log-prior of unknown parameter
+log_prior <- function(beta) {
+  prior = 1
+  return(prior)
+}
+```
+Metropolis implementation:
+```{r}
+#0) Initial values
+a <- 1 #error in proposal distro
+N <- 10000 #number of samples
+M <- p+1 #dimensions
+b <- matrix(0, nrow = N, ncol = M) #empty matrix to be filled with vals
+b[1,] <- c(0,0)  # first value of beta in the Markov chain is (0,0).
+
+for (i in 2:N) {
+    #1) Propose new position beta[i-1] -> beta[i]' from proposal distro
+    b_prop <- proposal(i, M, b, a)
+    
+    #2) Compute transition probability
+    P_prop <- logistic_ll(b_prop, X, y)+log_prior(b_prop)  #P(beta*)
+    P_prev <- logistic_ll(b[i-1,], X, y)+log_prior(b[i-1])  #P(beta^{i-1})
+    
+    #3) Acceptance ratio
+    alpha <- min(exp(P_prop - P_prev), 1)
+    
+    #3) Generate a random number u_i from [0,1]
+    u <- runif(1)  # u_i
+    
+    #4)
+    if (u <= alpha) {
+        b[i,] <- b_prop  # Accept y as next state
+    } else {
+        b[i,] <- b[i-1,]  # Stay at previous state of Markov chain
+    }
+}
+
+n <- as.integer(0.95 * N)
+C <- b[(N - n + 1):N,] #discard first 5% of samples
+```
+$\beta_1$ distro estimate:
+```{r}
+c = C[,1]
+# Plot of density function
+library(ggplot2)
+nbins <- ceiling( (2*n)**(1/3) ) #Terrell-Scott rule for min num bins
+ggplot() +
+  geom_histogram(aes(x = c, y = ..density..), bins = nbins, fill = "orange", color = "black", alpha = 0.6) +
+  geom_density(aes(x = c), color = "blue", linewidth = 1) +
+  labs(x = "l", y = "Density", title = "MCMC Approximation of the Posterior") +
+  xlim(min(c), max(c)) +
+  theme_minimal()
+```
+$\beta_2$ distro estimate:
+```{r}
+c = C[,2]
+# Plot of density function
+library(ggplot2)
+nbins <- ceiling( (2*n)**(1/3) ) #Terrell-Scott rule for min num bins
+ggplot() +
+  geom_histogram(aes(x = c, y = ..density..), bins = nbins, fill = "orange", color = "black", alpha = 0.6) +
+  geom_density(aes(x = c), color = "blue", linewidth = 1) +
+  labs(x = "l", y = "Density", title = "MCMC Approximation of the Posterior") +
+  xlim(min(c), max(c)) +
+  theme_minimal()
+```
+
+## (iii) Implementing a recursive approach in which we consider batches of data in a sequence
+First we partition the dataset
+```{r}
+#Number of partitions of dataset
+k <- 2
+
+#Number of rows
+n <- nrow(X)
+
+# Get row group assignments
+part_indices <- cut(seq_len(n), breaks = k, labels = FALSE)
+
+# Split row indices instead of splitting X directly
+index_groups <- split(seq_len(n), part_indices)
+
+# Turn each group of indices into a matrix
+parts_X <- lapply(index_groups, function(idx) X[idx, , drop = FALSE])
+y <- matrix(y, ncol = 1)
+parts_y <- lapply(index_groups, function(idx) y[idx, , drop = FALSE])
+```
+
+**2.1) Prior-recursive Bayesian Inference**
+```{r}
+#0) Initial values
+a <- 1 #error in proposal distro
+N <- 10000 #number of samples
+M <- p+1 #dimensions
+    
+for (j in range(1,k)) { 
+  if (j == 1) {
+    #Iteration j==1
+    #====================
+    log_prior <- function(beta) {
+      prior = 1
+      return(prior)
+    }
+    
+    #0) Initial values
+    b <- matrix(0, nrow = N, ncol = M) #empty matrix to be filled with vals
+    b[1,] <- c(0,0)  # first value of beta in the Markov chain is (0,0).
+    
+    for (i in 2:N) {
+        #1) Propose new position beta[i-1] -> beta[i]' from proposal distro
+        b_prop <- proposal(i, M, b, a)
+        
+        #2) Compute transition probability
+        P_prop <- logistic_ll(b_prop, parts_X$`1`, parts_y$`1`)+log_prior(b_prop)  #P(beta*)
+        P_prev <- logistic_ll(b[i-1,], parts_X$`1`, parts_y$`1`)+log_prior(b[i-1])  #P(beta^{i-1})
+        
+        #3) Acceptance ratio
+        alpha <- min(exp(P_prop - P_prev), 1)
+        
+        #3) Generate a random number u_i from [0,1]
+        u <- runif(1)  # u_i
+        
+        #4)
+        if (u <= alpha) {
+            b[i,] <- b_prop  # Accept y as next state
+        } else {
+            b[i,] <- b[i-1,]  # Stay at previous state of Markov chain
+        }
+    }
+    n <- as.integer(0.95 * N)
+    C <- b[(N - n + 1):N,] #discard first 5% of samples
+  
+    } else {
+    #Iteration j > 1
+    #====================
+    log_prior <- function(beta) {
+      prior_d = 1
+      d = 1
+      while (d < dim(C)[2]) {
+        kde = density(C[,d])
+        if ( min(C[,d]) < beta[d] && beta[d] < max(C[,d]) ){
+          density_at_point = approx(kde$x, kde$y, xout = beta[d])
+          prior_d = prior_d * density_at_point$y
+        }
+        else {
+          prior_d = 0
+        }
+        d = d+1
+      }
+      prior = log(prior_d)
+      return(prior)
+    }
+    
+    #0) Initial values
+    b <- matrix(0, nrow = N, ncol = M) #empty matrix to be filled with vals
+    b[1,] <- c(0,0)  # first value of beta in the Markov chain is (0,0).
+    
+    for (i in 2:N) {
+        #1) Propose new position beta[i-1] -> beta[i]' from proposal distro
+        b_prop <- proposal(i, M, b, a)
+        
+        #2) Compute transition probability
+        P_prop <- logistic_ll(b_prop, parts_X[[j]], parts_y[[j]])+log_prior(b_prop)  #P(beta*)
+        P_prev <- logistic_ll(b[i-1,], parts_X[[j]], parts_y[[j]])+log_prior(b[i-1])  #P(beta^{i-1})
+        
+        #3) Acceptance ratio
+        alpha <- min(exp(P_prop - P_prev), 1)
+        
+        #3) Generate a random number u_i from [0,1]
+        u <- runif(1)  # u_i
+        
+        #4)
+        if (u <= alpha) {
+            b[i,] <- b_prop  # Accept y as next state
+        } else {
+            b[i,] <- b[i-1,]  # Stay at previous state of Markov chain
+        }
+    }
+    n <- as.integer(0.95 * N)
+    C <- b[(N - n + 1):N,] #discard first 5% of samples
+  }
+}
+```
+$\beta_1$ distro estimate:
+```{r}
+c = C[,1]
+# Plot of density function
+library(ggplot2)
+nbins <- ceiling( (2*n)**(1/3) ) #Terrell-Scott rule for min num bins
+ggplot() +
+  geom_histogram(aes(x = c, y = ..density..), bins = nbins, fill = "orange", color = "black", alpha = 0.6) +
+  geom_density(aes(x = c), color = "blue", linewidth = 1) +
+  labs(x = "l", y = "Density", title = "MCMC Approximation of the Posterior") +
+  xlim(min(c), max(c)) +
+  theme_minimal()
+```
+$\beta_2$ distro estimate:
+```{r}
+c = C[,2]
+# Plot of density function
+library(ggplot2)
+nbins <- ceiling( (2*n)**(1/3) ) #Terrell-Scott rule for min num bins
+ggplot() +
+  geom_histogram(aes(x = c, y = ..density..), bins = nbins, fill = "orange", color = "black", alpha = 0.6) +
+  geom_density(aes(x = c), color = "blue", linewidth = 1) +
+  labs(x = "l", y = "Density", title = "MCMC Approximation of the Posterior") +
+  xlim(min(c), max(c)) +
+  theme_minimal()
+```
+
+**2.2)/2.3) Prior-recursive Bayesian Inference**
+```{r}
+#0) Initial values
+a <- 1 #error in proposal distro
+M <- p+1 #dimensions
+    
+for (j in range(1,k)) { 
+  if (j == 1) {
+    #0) Initial values
+    N <- 10000 #number of samples
+    b <- matrix(0, nrow = N, ncol = M) #empty matrix to be filled with vals
+    b[1,] <- c(0,0)  # first value of beta in the Markov chain is (0,0).
+    
+    for (i in 2:N) {
+        #1) Propose new position beta[i-1] -> beta[i]' from proposal distro
+        b_prop <- proposal(i, M, b, a)
+        
+        #2) Compute transition probability
+        P_prop <- logistic_ll(b_prop, parts_X$`1`, parts_y$`1`) #P(beta*)
+        P_prev <- logistic_ll(b[i-1,], parts_X$`1`, parts_y$`1`) #P(beta^{i-1})
+        
+        #3) Acceptance ratio
+        alpha <- min(exp(P_prop - P_prev), 1)
+        
+        #3) Generate a random number u_i from [0,1]
+        u <- runif(1)  # u_i
+        
+        #4)
+        if (u <= alpha) {
+            b[i,] <- b_prop  # Accept y as next state
+        } else {
+            b[i,] <- b[i-1,]  # Stay at previous state of Markov chain
+        }
+    }
+    n <- as.integer(0.95 * N)
+    C <- b[(N - n + 1):N,] #discard first 5% of samples
+    
+  } else {
+    #Iteration j > 1
+    #====================
+    
+    #0) Initial values
+    N <- dim(C)[1] #number of samples
+    b <- matrix(0, nrow = N, ncol = M) #empty matrix to be filled with vals
+    b[1,] <- C[1,]  # first value of beta in the Markov chain is (0,0).
+    
+    for (i in 2:N) {
+        #1) Propose new position beta[i-1] -> beta[i]' from proposal distro
+        b_prop <- C[i,]
+        
+        #2) Compute transition probability
+        P_prop <- logistic_ll(b_prop, parts_X[[j]], parts_y[[j]]) #P(beta*)
+        P_prev <- logistic_ll(b[i-1,], parts_X[[j]], parts_y[[j]]) #P(beta^{i-1})
+        
+        #3) Acceptance ratio
+        alpha <- min(exp(P_prop - P_prev), 1)
+        
+        #3) Generate a random number u_i from [0,1]
+        u <- runif(1)  # u_i
+        
+        #4)
+        if (u <= alpha) {
+            b[i,] <- b_prop  # Accept y as next state
+        } else {
+            b[i,] <- b[i-1,]  # Stay at previous state of Markov chain
+        }
+    }
+    n <- as.integer(0.95 * N)
+    C <- b[(N - n + 1):N,] #discard first 5% of samples
+  }
+}
+```
+$\beta_1$ distro estimate:
+```{r}
+c = C[,1]
+# Plot of density function
+library(ggplot2)
+nbins <- ceiling( (2*n)**(1/3) ) #Terrell-Scott rule for min num bins
+ggplot() +
+  geom_histogram(aes(x = c, y = ..density..), bins = nbins, fill = "orange", color = "black", alpha = 0.6) +
+  geom_density(aes(x = c), color = "blue", linewidth = 1) +
+  labs(x = "l", y = "Density", title = "MCMC Approximation of the Posterior") +
+  xlim(min(c), max(c)) +
+  theme_minimal()
+```
+$\beta_2$ distro estimate:
+```{r}
+c = C[,2]
+# Plot of density function
+library(ggplot2)
+nbins <- ceiling( (2*n)**(1/3) ) #Terrell-Scott rule for min num bins
+ggplot() +
+  geom_histogram(aes(x = c, y = ..density..), bins = nbins, fill = "orange", color = "black", alpha = 0.6) +
+  geom_density(aes(x = c), color = "blue", linewidth = 1) +
+  labs(x = "l", y = "Density", title = "MCMC Approximation of the Posterior") +
+  xlim(min(c), max(c)) +
+  theme_minimal()
+```
+
