@@ -283,20 +283,19 @@ for (j in seq(1,k)) {
     
     #Define log_prior
     log_prior <- function(beta) {
-      prior_d = 1
+      prior_d = 0
       d = 1
       while (d < dim(C)[2]) {
         if ( min(C[,d]) < beta[d] && beta[d] < max(C[,d]) ){
           density_at_point = den_funs[[d]](beta[d])
-          prior_d = prior_d * density_at_point #Assume independence
+          prior_d = prior_d + log(density_at_point) #Assume independence
         }
         else {
-          prior_d = 1
+          prior_d = 0
         }
         d = d+1
       }
-      prior = log(prior_d)
-      return(prior)
+      return(prior_d)
     }
     
     #0) Initial values
