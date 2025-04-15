@@ -9,7 +9,6 @@ output:
 ---
 
 ## (i) Simulating Data from a Logistic Regression Model with Synthetic Predictors
-
 Logistic regression is a binary classifier. We want to find the probability that the observation $P(y = 1 \mid \mathbf{x})$ is a member of a class. 
 
 Along with the training set $\mathbf{X}$, we have a vector $\boldsymbol{\beta}$ of weights for each feature, including the intercept. The resulting evidence for the class is given by:
@@ -41,7 +40,6 @@ plot(X[,2],y)
 ```
 
 ## (ii) Sample from the posterior distribution of the regression coefficients using conventional Bayesian methods.
-
 As our goal is to compute the probability of the model given the data, we use Markov Chain Monte Carlo (MCMC) as our simulation (stochastic) method to obtain random samples of $\beta$.  
 <br>
 
@@ -125,6 +123,7 @@ log_prior_uniform <- function(beta) {
 Metropolis implementation:
 ```{r}
 #0) Initial values
+n_accept <- 0 #number of acceptances
 a <- 1 #error in proposal distro
 N <- 10000 #number of samples
 M <- p+1 #dimensions
@@ -154,6 +153,7 @@ for (i in 2:N) {
     #4)
     if (u <= alpha) {
         b[i,] <- b_prop  # Accept y as next state
+        n_accept = n_accept + 1
     } else {
         b[i,] <- b[i-1,]  # Stay at previous state of Markov chain
     }
@@ -161,6 +161,8 @@ for (i in 2:N) {
 
 n <- as.integer(0.95 * N)
 C <- b[(N - n + 1):N,] #discard first 5% of samples
+
+cat("Rate of acceptance:", n_accept/(N-1), "\n")
 ```
 $\beta_1$ distro estimate:
 ```{r}
@@ -188,6 +190,14 @@ ggplot() +
   xlim(min(c), max(c)) +
   theme_minimal()
 ```
+```{r}
+library(coda)
+mcmc_obj <- as.mcmc(C)
+traceplot(mcmc_obj)
+```
+```{r}
+autocorr.plot(mcmc_obj)
+```
 
 ## (iii) Implementing a recursive approach in which we consider batches of data in a sequence
 First we partition the dataset
@@ -213,6 +223,7 @@ parts_y <- lapply(index_groups, function(idx) y[idx, , drop = FALSE])
 **2.1) Prior-recursive Bayesian Inference**
 ```{r}
 #0) Initial values
+n_accept <- 0
 a <- 1 #error in proposal distro
 N <- 10000 #number of samples
 M <- p+1 #dimensions
@@ -249,6 +260,7 @@ for (j in seq(1,k)) {
         #4)
         if (u <= alpha) {
             b[i,] <- b_prop  # Accept y as next state
+            n_accept = n_accept + 1
         } else {
             b[i,] <- b[i-1,]  # Stay at previous state of Markov chain
         }
@@ -314,6 +326,7 @@ for (j in seq(1,k)) {
         #4)
         if (u <= alpha) {
             b[i,] <- b_prop  # Accept y as next state
+            n_accept = n_accept + 1
         } else {
             b[i,] <- b[i-1,]  # Stay at previous state of Markov chain
         }
@@ -322,6 +335,8 @@ for (j in seq(1,k)) {
     C <- b[(N - n + 1):N,] #discard first 5% of samples
   }
 }
+
+cat("Rate of acceptance:", n_accept/((N-k)*k), "\n")
 ```
 $\beta_1$ distro estimate:
 ```{r}
@@ -349,10 +364,19 @@ ggplot() +
   xlim(min(c), max(c)) +
   theme_minimal()
 ```
+```{r}
+mcmc_obj <- as.mcmc(C)
+traceplot(mcmc_obj)
+```
+```{r}
+autocorr.plot(mcmc_obj)
+```
 
 **2.2)/2.3) Prior-proposal recursive Bayesian Inference**
 ```{r}
 #0) Initial values
+n_accept <- 0
+N_total <- 0
 a <- 1 #error in proposal distro
 M <- p+1 #dimensions
     
@@ -363,6 +387,7 @@ for (j in seq(1,k)) {
     #====================
     #0) Initial values
     N <- 10000 #number of samples
+    N_total = N_total + N - 1
     b <- matrix(0, nrow = N, ncol = M) #empty matrix to be filled with vals
     b[1,] <- c(0,0)  # first value of beta in the Markov chain is (0,0).
     
@@ -389,6 +414,7 @@ for (j in seq(1,k)) {
         #4)
         if (u <= alpha) {
             b[i,] <- b_prop  # Accept y as next state
+            n_accept = n_accept + 1
         } else {
             b[i,] <- b[i-1,]  # Stay at previous state of Markov chain
         }
@@ -402,6 +428,7 @@ for (j in seq(1,k)) {
     #====================
     #0) Initial values
     N <- dim(C)[1] #number of samples
+    N_total = N_total + N - 1
     b <- matrix(0, nrow = N, ncol = M) #empty matrix to be filled with vals
     b[1,] <- C[1,]  # first value of beta in the Markov chain is (0,0).
     
@@ -424,6 +451,7 @@ for (j in seq(1,k)) {
         #4)
         if (u <= alpha) {
             b[i,] <- b_prop  # Accept y as next state
+            n_accept = n_accept + 1
         } else {
             b[i,] <- b[i-1,]  # Stay at previous state of Markov chain
         }
@@ -432,6 +460,8 @@ for (j in seq(1,k)) {
     C <- b[(N - n + 1):N,] #discard first 5% of samples
   }
 }
+
+cat("Rate of acceptance:", n_accept/N_total, "\n")
 ```
 $\beta_1$ distro estimate:
 ```{r}
@@ -459,4 +489,10 @@ ggplot() +
   xlim(min(c), max(c)) +
   theme_minimal()
 ```
-
+```{r}
+mcmc_obj <- as.mcmc(C)
+traceplot(mcmc_obj)
+```
+```{r}
+autocorr.plot(mcmc_obj)
+```
