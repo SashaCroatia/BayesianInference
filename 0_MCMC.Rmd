@@ -31,17 +31,19 @@ $$
 **Setup:**
 
 ```{r}
+#To be set by user:
 n = 2000 #number of observations (set it higher for consistency)
 beta <- c(1, 2, 3)#, 4, 5, 6)  # True coefficients (bias, and predictors) px1
 
+#Synthetic predictors
 p = length(beta)-1 #number of predictors
-M = p+1
+M = p+1 #number of predictors plus intercept
 library(MASS)
 X <- cbind(1, matrix(mvrnorm(n, mu = rep(0, p), Sigma = 1*diag(p)), n, p))  # Design matrix with intercept (bias). nxp
 
+#Response
 z <- X %*% beta  # Linear predictor. %*% = matrix mult. nx1 dim
 sig <- 1/(1+exp(-z)) #sigmoid (inv-logit) function, find probability in [0,1], predicted y
-
 y = rbinom(n=n, size=1, prob=sig) #size=num trials=1 -> bernoulli response var
 ```
 
@@ -126,64 +128,99 @@ logistic_ll <- function(beta, X, y) {
 
 # Log-prior of parameter that comes from proposal distro
 library(mvtnorm)
-log_prior <- function(distro, mu, lambda, sigma) {
+log_prior <- function(distro, mu, sigma) {
   # Compute the density at 'distro' under the MVN used in proposal()
-  prob <- dmvnorm(distro, mean = mu, sigma = lambda*sigma)
+  prob <- dmvnorm(distro, mean = mu, sigma = sigma)
   log_prob = log(prob)
-  return(0)
+  return(log_prob)
 }
 ```
 
 **Metropolis implementation:**
 
 ```{r}
-#0) Initial values
-n_accept <- 0 #number of acceptances
-N <- 10000 #number of samples
-M <- p+1 #dimensions
-b <- matrix(0, nrow = N, ncol = M) #empty matrix to be filled with vals
-b[1,] <- c(1,2,3) #rep(0, M)
-
-#Keep history of proposals
-P_list = rep(NA, N - 1)
-P_list[1] = logistic_ll(b[1,], X, y)
-
-#Adaptation parameters
-mu <- rep(0, M)
-sigma <- diag(M)
-lambda <- (2.38**2)/M
-gam <- 1
-for (i in 2:N) {
+metropolis <- function(X, y, M, N = 20000, a_target = 0.234, b1 = rep(0, M), batch = TRUE, batch_schedule = seq(50, N, by = 50)) {
+  #0) Initial values
+  n_accept <- 0 #number of acceptances
+  b <- matrix(0, nrow = N, ncol = M)
+  b[1,] <- b1 #rep(0, M)
+  
+  #Keep history of proposals
+  P_list <- rep(NA, N - 1)
+  P_list[1] <- logistic_ll(b[1,], X, y)
+  
+  #Adaptation parameters
+  batch_index <- 1
+  Tb <- 0 #start of batch
+  mu <- rep(0, M)
+  Sigma <- diag(M)
+  lambda <- (2.38**2)/M
+  gam <- 1
+  
+  for (i in 2:N) {
     #1) Propose new position beta[i-1] -> beta[i]' from proposal distro
-    b_prop <- proposal(mu, lambda, sigma)
+    b_prop <- proposal(mu, lambda, Sigma)
     
     #2) Compute transition probability
-    P_list[i] <- logistic_ll(b_prop, X, y) + log_prior(b_prop, mu, lambda, sigma)  #P(beta*)
+    P_list[i] <- logistic_ll(b_prop, X, y) + log_prior(b_prop, rep(0, M), diag(M))  #P(beta*)
     
     #3) Acceptance ratio
-    alpha <- min(exp(P_list[i] - P_list[i-1]), 1)
+    R <- exp(P_list[i] - P_list[i-1])
+    alpha <- min(R, 1)
     
     #4) Generate a random number u_i from [0,1]. Accept or reject proposal
     u <- runif(1)  # u_i
     if (u <= alpha) {
         b[i,] <- b_prop  # Accept y as next state
         n_accept = n_accept + 1
-        n_accept_std = n_accept_std + 1
     } else {
         b[i,] <- b[i-1,]  # Stay at previous state of Markov chain
         P_list[i] = P_list[i-1]
     }
     
     #5) Adaptive step
-    sigma = sigma + gam*( (b[i,]-mu)%*%t(b[i,]-mu) - sigma )
-    mu = mu + gam*( b[i,]-mu )
-    gam = 1/i
+    if (batch == TRUE) {
+      if (batch_index <= length(batch_schedule) && i == batch_schedule[batch_index]) {
+        #Batch update
+        Tb1 = i #T_{b+1}
+        b_batch = b[(Tb + 1):Tb1,]
+        n_batch = nrow(b_batch)
+        
+        #Covar update
+        cov_sum = matrix(0, M, M)
+        for (j in 1:n_batch) {
+          diff = matrix(b_batch[j,] - mu, ncol=1)
+          cov_sum = cov_sum + (diff%*%t(diff) - Sigma)
+        }
+        Sigma <- Sigma + cov_sum/n_batch + 1e-5*diag(M)
+        
+        #Mean update
+        mean_diff = colMeans(b_batch) - mu
+        mu = mu + mean_diff
+        
+        #Parameter update
+        Tb = Tb1
+        batch_index = batch_index + 1
+        lambda = exp( log(lambda) + (R-a_target)/n_batch )
+      }
+    } else { #Batch == FALSE
+      gam = 1/i
+      sigma = sigma + gam*( (b[i,]-mu)%*%t(b[i,]-mu) - sigma )
+      mu = mu + gam*( b[i,]-mu )
+      lambda = exp( log(lambda) + gam*(R-a_target) )
+    }
+  }
+
+  n <- as.integer(0.9 * N)
+  C <- b[(N - n + 1):N,] #discard first 10% of samples
+  
+  cat("Acceptance rate:", n_accept/(N-1), "\n")
+  return(C)
 }
+```
 
-n <- as.integer(0.9 * N)
-C <- b[(N - n + 1):N,] #discard first 10% of samples
-
-cat("Acceptance rate:", n_accept/(N-1), "\n")
+```{r}
+C = metropolis(X, y, M)
 ```
 
 $\beta$ distribution estimate:
