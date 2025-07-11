@@ -1,0 +1,308 @@
+---
+title: "Prior Recursive"
+author: "Alexander Berliner"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+---
+
+### (i) Simulating Data from a Logistic Regression Model with Synthetic Predictors
+
+Logistic regression is a binary classifier. We want to find the probability that the observation $P(y = 1 \mid \mathbf{x})$ is a member of a class.
+
+Along with the training set $\mathbf{X}$, an $n\text{x}p$ matrix of $n$ observations and $M$ predictors, including one column of 1s for the intercept, we also have a $M\text{x}1$ vector $\boldsymbol{\beta}$ of weights for each feature, including the intercept. The resulting evidence for the class is given by:
+
+$$ z = \mathbf{X} \boldsymbol{\beta} $$
+
+To convert $z$ into a probability, we pass it through the sigmoid (logistic) function:
+
+$$ \sigma(z) = \frac{1}{1 + e^{-z}} $$
+
+**References**:
+
+1.  <https://web.stanford.edu/~jurafsky/slp3/5.pdf>
+
+**Setup:**
+
+```{r}
+#To be set by user:
+n = 2000 #number of observations (set it higher for consistency)
+beta <- c(1, 2, 3)#, 4, 5, 6)  # True coefficients (bias, and predictors) px1
+
+#Synthetic predictors
+p = length(beta)-1 #number of predictors
+M = p+1 #number of predictors plus intercept
+library(MASS)
+X <- cbind(1, matrix(mvrnorm(n, mu = rep(0, p), Sigma = 1*diag(p)), n, p))  #Design matrix with intercept (bias). nxp
+
+#Response
+z <- X %*% beta  # Linear predictor. %*% = matrix mult. nx1 dim
+sig <- 1/(1+exp(-z)) #sigmoid (inv-logit) function, find probability in [0,1], predicted y
+y = rbinom(n=n, size=1, prob=sig) #size=num trials=1 -> bernoulli response var
+```
+
+### (ii) Implementing a recursive approach in which we consider batches of data in a sequence
+
+**2.1) Prior-recursive Bayesian Inference [1]**
+
+**HMC implementation [2]:**
+
+```{r}
+hmc <- function(X, y, niter = 5000, nburnin = 1000, nchains = 1, inits = NULL, KDE = FALSE, C = NA, kde_fit_for_wrapper = NULL, posterior_samples_for_r = NULL) {
+  n = nrow(X)
+  M = ncol(X)
+  
+  #1) Define model
+  #---------------
+  library(nimble)
+  if (KDE == FALSE) {
+    log_reg_code <- nimbleCode({
+      #Piors
+      for (j in 1:M) {
+        beta[j] ~ dnorm(mean = 0, sd = 100)
+      }
+      
+      #Likelihood
+      for (i in 1:n) {
+        logit(p[i]) <- inprod(X[i, 1:M], beta[1:M])
+        y[i] ~ dbern(p[i]) 
+      }
+    })
+  } else {
+    log_reg_code <- nimbleCode({
+      #Piors
+      beta[1:M] ~ dkde_mv(kde_wrapper_constant, rk_wrapper_constant)
+      
+      #Likelihood
+      for (i in 1:n) {
+        logit(p[i]) <- inprod(X[i, 1:M], beta[1:M])
+        y[i] ~ dbern(p[i]) 
+      }
+    })
+  }
+  
+  #2) Prepare data, constants, init values
+  #---------------
+  hmc_consts <- list(n = n, M = M)
+  hmc_data <- list(y = y, X = X)
+  
+  if(is.null(inits)){
+    hmc_inits <- list(beta = rep(0, M))
+  } else {
+    hmc_inits <- list(beta = inits)
+  }
+  
+if (KDE == TRUE) {
+  # 1. Create R wrappers
+  kde_rfun <- make_kde_mv_rfun(kde_fit_for_wrapper)
+  rk_rfun <- make_rkde_mv_rfun(posterior_samples_for_r)
+
+  # 2. Wrap them with nimbleRcall
+  kde_wrapper_constant <- nimbleRcall(
+    function(x = double(1)) {},
+    Rfun = kde_rfun,
+    returnType = double(0)
+  )
+
+  rk_wrapper_constant <- nimbleRcall(
+    function() {},
+    Rfun = rk_rfun,
+    returnType = double(1)
+  )
+
+  # 3. Attach these as constants
+  hmc_consts$kde_wrapper_constant <- kde_wrapper_constant
+  hmc_consts$rk_wrapper_constant <- rk_wrapper_constant
+}
+  
+  #3) Create model
+  #---------------
+  model <- nimbleModel(
+    code = log_reg_code,
+    constants = hmc_consts,
+    data = hmc_data,
+    inits = hmc_inits,
+    calculate = FALSE,
+    buildDerivs = TRUE
+  )
+  
+  #4) Compile model and mcmc to C++ for speed
+  #---------------
+  compiled_model <- compileNimble(model)
+  
+  #5) Configure model
+  #---------------
+  library(nimbleHMC)
+  model_config <- configureHMC(model)
+  model_config$removeSamplers() #remove all
+  model_config$addSampler(target = "beta")
+  
+  #6) Build HMC algo
+  #---------------
+  HMC <- buildHMC(model = compiled_model, hmcConf = model_config)
+  
+  #7) Compile HMC algo
+  #---------------
+  compiled_HMC <- compileNimble(HMC, project = model)
+  
+  #8) Run HMC sampler
+  #---------------
+  samples <- runMCMC(
+    compiled_HMC,
+    niter = niter,
+    nburnin = nburnin,
+    nchains = nchains,
+    summary = TRUE
+  )
+  
+  return(samples)
+}
+```
+
+**Define functions [3]:**
+
+**Prior Recursive function:**
+
+```{r}
+library(nimble)
+library(ks)
+
+make_kde_mv_rfun <- function(kde_fit_obj) {
+  function(x_vec) {
+    dens <- ks::predict(kde_fit_obj, x = matrix(x_vec, ncol = ncol(kde_fit_obj$x)))
+    return(as.numeric(dens))
+  }
+}
+
+make_rkde_mv_rfun <- function(posterior_samples_matrix) {
+  num_samples <- nrow(posterior_samples_matrix)
+  
+  function() {
+    sample_idx <- sample(1:num_samples, 1)
+    return(posterior_samples_matrix[sample_idx, ])
+  }
+}
+
+dkde_mv_nf <- nimbleFunction(
+  setup = function(kde_rfun_wrapper, rk_rfun_wrapper) {
+  },
+  run = function(x = double(1), log = integer(0)) {
+    returnType(double(0))
+    dens <- kde_rfun_wrapper(x)
+    if (log) return(log(dens)) else return(dens)
+  }
+)
+
+rkde_mv_nf <- nimbleFunction(
+  setup = function(kde_rfun_wrapper, rk_rfun_wrapper) {
+  },
+  run = function(n = integer(0)) {
+    returnType(double(1))
+    sample_val <- rk_rfun_wrapper()
+    return(sample_val)
+  }
+)
+
+registerDistributions(list(
+  dkde_mv = list(
+    BUGSdist = "dkde_mv()",
+    types = c("value = double(1)")
+  )
+))
+
+
+prior_recursive <- function(k, X, y, niter = 500, nburnin = 100) {
+  #Partition the data
+  #Number of rows
+  n <- nrow(X)
+  
+  # Get row group assignments
+  part_indices <- cut(seq_len(n), breaks = k, labels = FALSE)
+  
+  # Split row indices instead of splitting X directly
+  index_groups <- split(seq_len(n), part_indices)
+  
+  # Turn each group of indices into a matrix
+  parts_X <- lapply(index_groups, function(idx) X[idx, , drop = FALSE])
+  y <- matrix(y, ncol = 1)
+  parts_y <- lapply(index_groups, function(idx) y[idx, , drop = FALSE])
+  
+  C <- NULL
+  
+  #Prior recursive implementation
+  for (j in seq(1,k)) { 
+    if (j == 1) {
+      
+      C = hmc(parts_X[[j]], unlist(list(parts_y[[j]])), niter = niter, nburnin = nburnin, nchains = 1, inits = NULL, KDE = FALSE, C = NA, kde_fit_for_wrapper = NULL, posterior_samples_for_r = NULL)$samples
+    
+    } else {
+      
+      #Create KDE MAP (modes) vals
+      modes <- list()
+      d = 1
+      while (d <= dim(C)[2]) {
+        kde <- density(C[,d])
+        modes[[d]] <- kde$x[which.max(kde$y)]
+        d = d+1
+      }
+      modes = unlist(modes)
+      
+      # Define global posterior_samples and kde_fit
+      kde_fit_current <- ks::kde(x = C)
+
+      C = hmc(parts_X[[j]], unlist(list(parts_y[[j]])), niter = niter, nburnin = nburnin, nchains = 1, inits = modes, KDE = TRUE, C = C, kde_fit_for_wrapper = kde_fit_current, posterior_samples_for_r = C)$samples
+
+    }
+  }
+  return(C)
+}
+```
+
+```{r}
+samples = prior_recursive(2,X,y)
+```
+
+**References:**
+
+1.  Hooten et al. *Making Recursive Bayesian Inference Accessible.*
+2.  <https://r-nimble.org/html_manual/cha-lightning-intro.html>
+3.  <https://r-nimble.org/html_manual/cha-user-defined.html>
+
+### (iii) Diagnostics
+
+**Visualization** of the posterior sample distribution of one of the $\beta_i$:
+
+```{r}
+c = samples[,1]
+# Plot of density function
+library(ggplot2)
+nbins <- ceiling( (2*n)**(1/3) ) #Terrell-Scott rule for min num bins
+ggplot() +
+  geom_histogram(aes(x = c, y = ..density..), bins = nbins, fill = "orange", color = "black", alpha = 0.6) +
+  geom_density(aes(x = c), color = "blue", linewidth = 1) +
+  labs(x = "l", y = "Density", title = "MCMC Approximation of the Posterior") +
+  xlim(min(c), max(c)) +
+  theme_minimal()
+```
+
+**Traceplots** of each $\beta_i$.
+
+```{r}
+library(coda)
+mcmc_obj <- as.mcmc(samples)
+traceplot(mcmc_obj)
+```
+
+**Autocorrelation plots** of each $\beta_i$.
+
+```{r}
+autocorr.plot(mcmc_obj)
+```
+
+**Effective sample size** of each $\beta_i$.
+
+```{r}
+effectiveSize(mcmc_obj)
+```

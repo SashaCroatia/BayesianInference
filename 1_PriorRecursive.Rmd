@@ -1,5 +1,5 @@
 ---
-title: "Recursive Bayesian Methods"
+title: "Prior Recursive"
 author: "Alexander Berliner"
 date: "`r Sys.Date()`"
 output:
@@ -258,3 +258,7 @@ traceplot(mcmc_obj)
 ```{r}
 autocorr.plot(mcmc_obj)
 ```
+
+References:
+
+-   Hooten et al. *Making Recursive Bayesian Inference Accessible.*
