@@ -6,6 +6,7 @@ output:
   html_document:
     df_print: paged
   pdf_document: default
+---a
 ---
 
 ### (i) Simulating Data from a Logistic Regression Model with Synthetic Predictors
@@ -47,6 +48,47 @@ y = rbinom(n=n, size=1, prob=sig) #size=num trials=1 -> bernoulli response var
 
 **2.1) Prior-recursive Bayesian Inference [1]**
 
+**User-defined distributions [3]**
+
+```{r}
+kde_wrapper <- function(x, samples) {
+  kde <- density(samples)
+  kde_func <- approxfun(kde$x, kde$y)
+  kde_func(x)
+}
+
+library(nimble)
+dkde <- nimbleFunction(
+  setup = function() {
+    kdeR <- nimbleRcall(
+      function(x = double(0), samples = double(1)) {},
+      Rfun = 'kde_wrapper',
+      returnType = double(0)
+    )
+  },
+  run = function(x = double(0), samples = double(1), log = integer(0, default = 0)) {
+    returnType(double(0))
+    
+    dens <- kdeR(x, samples)
+    if (dens <= 0) dens <- 1e-12
+    if (log) return(log(dens))
+    else return(dens)
+  }
+)
+
+rkde <- nimbleFunction(
+  run = function(n = integer(0), samples = double(1)) {
+    returnType(double(0))
+
+    len <- length(samples)
+    idx <- as.integer(1 + floor(runif(1, 0, len)))  # uniform index from 1 to len
+    out <- samples[idx]
+
+    return(out)
+  }
+)
+```
+
 **HMC implementation [2]**
 
 ```{r}
@@ -72,9 +114,9 @@ hmc <- function(X, y, niter = 5000, nburnin = 1000, nchains = 1, inits = NULL, K
     })
   } else {
     log_reg_code <- nimbleCode({
-      #Piors
+      #Priors
       for (j in 1:M) {
-        beta[j] ~ dnorm(mean = mean(C[1:n,j]), sd = sd(C[1:n,j]))
+        beta[j] ~ dkde(C[1:n,j])
       }
       
       #Likelihood
@@ -194,7 +236,8 @@ samples = prior_recursive(2,X,y)
 **References:**
 
 1.  Hooten et al. *Making Recursive Bayesian Inference Accessible.*
-2.  <https://r-nimble.org/html_manual/cha-welcome-nimble.html>
+2.  <https://r-nimble.org/html_manual/cha-mcmc.html>
+3.  <https://r-nimble.org/html_manual/cha-user-defined.html>
 
 ### (iii) Diagnostics
 
