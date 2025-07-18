@@ -51,28 +51,32 @@ y = rbinom(n=n, size=1, prob=sig) #size=num trials=1 -> bernoulli response var
 **User-defined distributions [3]**
 
 ```{r}
-kde_wrapper <- function(x, samples) {
-  kde <- density(samples)
-  kde_func <- approxfun(kde$x, kde$y)
-  kde_func(x)
-}
-
 library(nimble)
 dkde <- nimbleFunction(
-  setup = function() {
-    kdeR <- nimbleRcall(
-      function(x = double(0), samples = double(1)) {},
-      Rfun = 'kde_wrapper',
-      returnType = double(0)
-    )
-  },
-  run = function(x = double(0), samples = double(1), log = integer(0, default = 0)) {
+  run = function(x = double(0), j = integer(0), kde_array = double(3), log = integer(0, default = 0)) {
     returnType(double(0))
     
-    dens <- kdeR(x, samples)
-    if (dens <= 0) dens <- 1e-12
-    if (log) return(log(dens))
-    else return(dens)
+    kde_x <- kde_array[, j, 1]
+    kde_y <- kde_array[, j, 2]
+    
+    #out of bounds
+    if (x < min(kde_x) | x > max(kde_x)) return(1e-12)
+    
+    #find index
+    i <- max(which(kde_x <= x))
+    if (i == length(kde_x)) return(y[i])
+    
+    #approxfun
+    x0 <- kde_x[i]
+    x1 <- kde_x[i+1]
+    y0 <- kde_y[i]
+    y1 <- kde_y[i+1]
+    
+    out <- y0 + (y1 - y0)*(x - x0)/(x1 - x0)
+    
+    if (out <= 0) out <- 1e-12
+    if (log) return(log(out))
+    else return(out)
   }
 )
 
@@ -81,18 +85,27 @@ rkde <- nimbleFunction(
     returnType(double(0))
 
     len <- length(samples)
-    idx <- as.integer(1 + floor(runif(1, 0, len)))  # uniform index from 1 to len
+    idx <- as.integer(1 + floor(runif(1, 0, len)))
     out <- samples[idx]
 
     return(out)
   }
 )
+
+registerDistributions(list(
+  dkde = list(
+    BUGSdist = "dkde(j, kde_array)",
+    discrete = FALSE
+  )
+))
 ```
 
 **HMC implementation [2]**
 
 ```{r}
 hmc <- function(X, y, niter = 5000, nburnin = 1000, nchains = 1, inits = NULL, KDE = FALSE, C = NA) {
+  #0) Define constants
+  #---------------
   n = nrow(X)
   M = ncol(X)
   
@@ -101,7 +114,7 @@ hmc <- function(X, y, niter = 5000, nburnin = 1000, nchains = 1, inits = NULL, K
   library(nimble)
   if (KDE == FALSE) {
     log_reg_code <- nimbleCode({
-      #Piors
+      #Priors
       for (j in 1:M) {
         beta[j] ~ dnorm(mean = 0, sd = 100)
       }
@@ -113,10 +126,26 @@ hmc <- function(X, y, niter = 5000, nburnin = 1000, nchains = 1, inits = NULL, K
       }
     })
   } else {
+    n_grid <- 512
+    M <- ncol(C)
+    
+    kde_x <- list()
+    kde_y <- list()
+    for (j in 1:M) {
+      kde <- density(C[,j], n = n_grid)
+      kde_x[[j]] <- kde$x
+      kde_y[[j]] <- kde$y
+    }
+    kde_array <- array(0, dim = c(n_grid, M, 2))
+    for (j in 1:M) {
+      kde_array[, j, 1] <- kde_x[[j]]
+      kde_array[, j, 2] <- kde_y[[j]]
+    }
+
     log_reg_code <- nimbleCode({
       #Priors
       for (j in 1:M) {
-        beta[j] ~ dkde(C[1:n,j])
+        beta[j] ~ dkde(j,kde_array)
       }
       
       #Likelihood
@@ -129,8 +158,15 @@ hmc <- function(X, y, niter = 5000, nburnin = 1000, nchains = 1, inits = NULL, K
   
   #2) Prepare data, constants, init values
   #---------------
-  hmc_consts <- list(n = n, M = M)
-  hmc_data <- list(y = y, X = X, C = C)
+  if (KDE == FALSE) {
+    hmc_consts <- list(n = n, M = M)
+    hmc_data <- list(y = y, X = X)
+    hmc_dim <- list(y = n, X = c(n, M))
+  } else {
+    hmc_consts <- list(n = n, M = M, kde_array = kde_array)
+    hmc_data <- list(y = y, X = X)
+    hmc_dim <- list(y = n, X = c(n,M), kde_array = c(n_grid,M,2))
+  }
   
   if(is.null(inits)){
     hmc_inits <- list(beta = rep(0, M))
@@ -146,7 +182,8 @@ hmc <- function(X, y, niter = 5000, nburnin = 1000, nchains = 1, inits = NULL, K
     data = hmc_data,
     inits = hmc_inits,
     calculate = FALSE,
-    buildDerivs = TRUE
+    buildDerivs = TRUE,
+    dimensions = hmc_dim
   )
   
   #4) Compile model and mcmc to C++ for speed
@@ -210,12 +247,10 @@ prior_recursive <- function(k, X, y, niter = 5000, nburnin = 1000) {
     } else {
       
       #Create KDE functions and MAP (modes) vals
-      den_funs <- list()
       modes <- list()
       d = 1 #iterative
       while (d <= dim(C)[2]) {
         kde <- density(C[,d])
-        den_funs[[d]] <- approxfun(kde$x, kde$y) #approx fun
         modes[[d]] <- kde$x[which.max(kde$y)]
         d = d+1
       }
