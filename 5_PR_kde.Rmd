@@ -6,7 +6,6 @@ output:
   html_document:
     df_print: paged
   pdf_document: default
----a
 ---
 
 ### (i) Simulating Data from a Logistic Regression Model with Synthetic Predictors
@@ -52,52 +51,42 @@ y = rbinom(n=n, size=1, prob=sig) #size=num trials=1 -> bernoulli response var
 
 ```{r}
 library(nimble)
-dkde <- nimbleFunction(
-  run = function(x = double(0), j = integer(0), kde_array = double(3), log = integer(0, default = 0)) {
-    returnType(double(0))
-    
-    kde_x <- kde_array[, j, 1]
-    kde_y <- kde_array[, j, 2]
-    
+d_kde <- nimbleFunction(
+  run = function(x = double(0), iterative = double(0), xkde = double(1), ykde = double(1), log = integer(0, default = 0)) {
+
+    kde_x <- xkde
+    kde_y <- ykde
+
     #out of bounds
     if (x < min(kde_x) | x > max(kde_x)) return(1e-12)
-    
+
     #find index
     i <- max(which(kde_x <= x))
-    if (i == length(kde_x)) return(y[i])
-    
+    if (i == length(kde_x)) return(kde_y[i])
+
     #approxfun
     x0 <- kde_x[i]
     x1 <- kde_x[i+1]
     y0 <- kde_y[i]
     y1 <- kde_y[i+1]
-    
-    out <- y0 + (y1 - y0)*(x - x0)/(x1 - x0)
-    
-    if (out <= 0) out <- 1e-12
-    if (log) return(log(out))
-    else return(out)
-  }
-)
 
-rkde <- nimbleFunction(
-  run = function(n = integer(0), samples = double(1)) {
+    ans <- log(y0 + (y1 - y0)*(x - x0)/(x1 - x0))
+    ans = x
+    
+    if(log) return(ans)
+    return(exp(ans))
     returnType(double(0))
-
-    len <- length(samples)
-    idx <- as.integer(1 + floor(runif(1, 0, len)))
-    out <- samples[idx]
-
-    return(out)
-  }
+  },
+  buildDerivs=TRUE
 )
 
-registerDistributions(list(
-  dkde = list(
-    BUGSdist = "dkde(j, kde_array)",
-    discrete = FALSE
-  )
-))
+r_kde<- nimbleFunction(
+  run = function(n = integer(0), iterative = double(0), xkde = double(1), ykde = double(1)) {
+    dev <- runif(1, 0, 1)
+    return(dev)
+    returnType(double(0))
+  }
+)
 ```
 
 **HMC implementation [2]**
@@ -126,26 +115,27 @@ hmc <- function(X, y, niter = 5000, nburnin = 1000, nchains = 1, inits = NULL, K
       }
     })
   } else {
+    #Kde function lists
     n_grid <- 512
-    M <- ncol(C)
+    kde_x <- matrix(NA, nrow = n_grid, ncol = M)
+    kde_y <- matrix(NA, nrow = n_grid, ncol = M)
+
+    for (j in 1:M) {
+      kde <- density(C[, j], n = n_grid)
+      kde_x[, j] <- kde$x  # each column is a KDE grid
+      kde_y[, j] <- kde$y  # each column is the corresponding density
+    }
     
-    kde_x <- list()
-    kde_y <- list()
-    for (j in 1:M) {
-      kde <- density(C[,j], n = n_grid)
-      kde_x[[j]] <- kde$x
-      kde_y[[j]] <- kde$y
-    }
-    kde_array <- array(0, dim = c(n_grid, M, 2))
-    for (j in 1:M) {
-      kde_array[, j, 1] <- kde_x[[j]]
-      kde_array[, j, 2] <- kde_y[[j]]
-    }
+    #Iterative list
+    iter_list = c(1:M)
+    x_kde_list = kde_x
+    y_kde_list = kde_y
+    
 
     log_reg_code <- nimbleCode({
       #Priors
       for (j in 1:M) {
-        beta[j] ~ dkde(j,kde_array)
+        beta[j] ~ d_kde(iterative = iter[j], xkde = x_kde[1:n_grid, j], ykde = y_kde[1:n_grid, j])
       }
       
       #Likelihood
@@ -163,9 +153,9 @@ hmc <- function(X, y, niter = 5000, nburnin = 1000, nchains = 1, inits = NULL, K
     hmc_data <- list(y = y, X = X)
     hmc_dim <- list(y = n, X = c(n, M))
   } else {
-    hmc_consts <- list(n = n, M = M, kde_array = kde_array)
-    hmc_data <- list(y = y, X = X)
-    hmc_dim <- list(y = n, X = c(n,M), kde_array = c(n_grid,M,2))
+    hmc_consts <- list(n = n, M = M, iter = iter_list, n_grid = n_grid)
+    hmc_data <- list(y = y, X = X, x_kde = x_kde_list, y_kde = y_kde_list)
+    hmc_dim <- list(y = n, X = c(n,M), x_kde = c(n_grid,M), y_kde = c(n_grid,M))
   }
   
   if(is.null(inits)){
@@ -181,7 +171,7 @@ hmc <- function(X, y, niter = 5000, nburnin = 1000, nchains = 1, inits = NULL, K
     constants = hmc_consts,
     data = hmc_data,
     inits = hmc_inits,
-    calculate = FALSE,
+    #calculate = FALSE,
     buildDerivs = TRUE,
     dimensions = hmc_dim
   )
