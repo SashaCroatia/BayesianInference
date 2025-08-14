@@ -31,20 +31,21 @@ $$
 **Setup:**
 
 ```{r}
-#To be set by user:
-n = 2000 #number of observations (set it higher for consistency)
-beta <- c(1, 2, 3)#, 4, 5, 6)  # True coefficients (bias, and predictors) px1
+# To be set by user:
+n <- 2000 # number of observations (set it higher for consistency)
+beta <- c(1, 2, 3) # , 4, 5, 6)  # True coefficients (bias, and predictors) px1
 
-#Synthetic predictors
-p = length(beta)-1 #number of predictors
-M = p+1 #number of predictors plus intercept
+# Synthetic predictors
+p <- length(beta) - 1 # number of predictors
+M <- p + 1 # number of predictors plus intercept
 library(MASS)
-X <- cbind(1, matrix(mvrnorm(n, mu = rep(0, p), Sigma = 1*diag(p)), n, p))  # Design matrix with intercept (bias). nxp
+set.seed(7)
+X <- cbind(1, matrix(mvrnorm(n, mu = rep(0, p), Sigma = 1 * diag(p)), n, p)) # Design matrix with intercept (bias). nxp
 
-#Response
-z <- X %*% beta  # Linear predictor. %*% = matrix mult. nx1 dim
-sig <- 1/(1+exp(-z)) #sigmoid (inv-logit) function, find probability in [0,1], predicted y
-y = rbinom(n=n, size=1, prob=sig) #size=num trials=1 -> bernoulli response var
+# Response
+z <- X %*% beta # Linear predictor. %*% = matrix mult. nx1 dim
+sig <- 1 / (1 + exp(-z)) # sigmoid (inv-logit) function, find probability in [0,1], predicted y
+y <- rbinom(n = n, size = 1, prob = sig) # size=num trials=1 -> bernoulli response var
 ```
 
 ## (ii) Basic MCMC.
@@ -81,8 +82,6 @@ In MCMC for a sufficiently large $i$, we want the realization $\beta^i$ from the
 
 0.  State the initial values: $N$ iterations, $M$ dimensions, and a $N$x$M$ matrix $b$ where the first row is our initial guess $\beta^0 = [\beta_1^0,\ldots,\beta_M^0]$, and the subsequent rows is the sequence of the Markov chain of samples.
 
-<!-- -->
-
 1.  At iteration $i$, propose a new sample $\beta_{prop}$ from a symmetric proposal distribution $J_i(\beta^*\vert\beta^{i-1})=J_i(\beta^{i-1}\vert\beta^*)$ [1]. The choice of the proposal distribution determines if the chain is irreducible and aperiodic, two sufficient conditions for convergence of Metropolis chains [2, 185].
 
 2.  Compute the transition probability $P(\beta^*) = p(y\vert X, \beta^*)p(\beta^*)$ where $p(y\vert \cdot)$ is the likelihood and $p(\beta^*)$ is the prior.
@@ -111,10 +110,10 @@ In MCMC for a sufficiently large $i$, we want the realization $\beta^i$ from the
 **Define initial functions:**
 
 ```{r}
-#Proposal distro
+# Proposal distro
 proposal <- function(mu, lambda, sigma) {
   # Draw a single sample from multivariate normal
-  distro <- mvrnorm(1, mu = mu, Sigma = lambda*sigma)
+  distro <- mvrnorm(1, mu = mu, Sigma = lambda * sigma)
   return(distro)
 }
 
@@ -122,7 +121,7 @@ proposal <- function(mu, lambda, sigma) {
 logistic_ll <- function(beta, X, y) {
   z <- X %*% beta
   p <- 1 / (1 + exp(-z))
-  loglike <- sum(log(p[y==1]))+sum(log((1-p)[y==0]))
+  loglike <- sum(log(p[y == 1])) + sum(log((1 - p)[y == 0]))
   return(loglike)
 }
 
@@ -131,7 +130,7 @@ library(mvtnorm)
 log_prior <- function(distro, mu, sigma) {
   # Compute the density at 'distro' under the MVN used in proposal()
   prob <- dmvnorm(distro, mean = mu, sigma = sigma)
-  log_prob = log(prob)
+  log_prob <- log(prob)
   return(log_prob)
 }
 ```
@@ -139,10 +138,10 @@ log_prior <- function(distro, mu, sigma) {
 **Metropolis implementation:**
 
 ```{r}
-metropolis <- function(X, y, M, N = 20000, a_target = 0.234, b1 = rep(0, M), batch = TRUE, batch_schedule = seq(50, N, by = 50)) {
+metropolis <- function(X, y, N = 20000, prior = TRUE, update = FALSE, KDE = FALSE, C = NA, den_funs = NA, M = ncol(X), a_target = 0.234, b1 = rep(0, M), batch = TRUE, batch_schedule = seq(50, N, by = 50)) {
   #0) Initial values
   if (batch == FALSE) {
-    a_target = a_target/2.26 
+    a_target <- a_target/2.26 
   }
   n_accept <- 0 #number of acceptances
   b <- matrix(0, nrow = N, ncol = M)
@@ -162,10 +161,22 @@ metropolis <- function(X, y, M, N = 20000, a_target = 0.234, b1 = rep(0, M), bat
   
   for (i in 2:N) {
     #1) Propose new position beta[i-1] -> beta[i]' from proposal distro
-    b_prop <- proposal(mu, lambda, Sigma)
+    if (update == FALSE) {
+      b_prop <- proposal(mu, lambda, Sigma)
+    } else {
+      b_prop <- C[i,]
+    }
     
     #2) Compute transition probability
-    P_list[i] <- logistic_ll(b_prop, X, y) + log_prior(b_prop, rep(0, M), diag(M))  #P(beta*)
+    if (prior == TRUE) {
+      if (KDE == FALSE) {
+        P_list[i] <- logistic_ll(b_prop, X, y) + log_prior(b_prop, rep(0, M), diag(M))  #P(beta*)
+      } else {
+        P_list[i] <- logistic_ll(b_prop, X, y) + log_prior_kde(b_prop, C, den_funs)
+      }
+    } else {
+      P_list[i] <- logistic_ll(b_prop, X, y)
+    }
     
     #3) Acceptance ratio
     R <- exp(P_list[i] - P_list[i-1])
@@ -175,42 +186,42 @@ metropolis <- function(X, y, M, N = 20000, a_target = 0.234, b1 = rep(0, M), bat
     u <- runif(1)  # u_i
     if (u <= alpha) {
         b[i,] <- b_prop  # Accept y as next state
-        n_accept = n_accept + 1
+        n_accept <- n_accept + 1
     } else {
         b[i,] <- b[i-1,]  # Stay at previous state of Markov chain
-        P_list[i] = P_list[i-1]
+        P_list[i] <- P_list[i-1]
     }
     
     #5) Adaptive step
     if (batch == TRUE) {
       if (batch_index <= length(batch_schedule) && i == batch_schedule[batch_index]) {
         #Batch update
-        Tb1 = i #T_{b+1}
-        b_batch = b[(Tb + 1):Tb1, , drop = FALSE]
-        n_batch = nrow(b_batch)
+        Tb1 <- i #T_{b+1}
+        b_batch <- b[(Tb + 1):Tb1, , drop = FALSE]
+        n_batch <- nrow(b_batch)
         
         #Covar update
-        cov_sum = matrix(0, M, M)
+        cov_sum <- matrix(0, M, M)
         for (j in 1:n_batch) {
-          diff = matrix(b_batch[j,] - mu, ncol=1)
-          cov_sum = cov_sum + (diff%*%t(diff) - Sigma)
+          diff <- matrix(b_batch[j,] - mu, ncol=1)
+          cov_sum <- cov_sum + (diff%*%t(diff) - Sigma)
         }
         Sigma <- Sigma + cov_sum/n_batch + 1e-5*diag(M)
         
         #Mean update
-        mean_diff = colMeans(b_batch) - mu
-        mu = mu + mean_diff
+        mean_diff <- colMeans(b_batch) - mu
+        mu <- mu + mean_diff
         
         #Parameter update
-        Tb = Tb1
-        batch_index = batch_index + 1
-        lambda = exp( log(lambda) + (alpha-a_target)/n_batch )
+        Tb <- Tb1
+        batch_index <- batch_index + 1
+        lambda <- exp( log(lambda) + (alpha-a_target)/n_batch )
       }
     } else { #Batch == FALSE
-      gam = 1/i
-      Sigma = Sigma + gam*( (b[i,]-mu)%*%t(b[i,]-mu) - Sigma )
-      mu = mu + gam*( b[i,]-mu )
-      lambda = exp( log(lambda) + gam*(alpha-a_target) )
+      gam <- 1/i
+      Sigma <- Sigma + gam*( (b[i,]-mu)%*%t(b[i,]-mu) - Sigma )
+      mu <- mu + gam*( b[i,]-mu )
+      lambda <- exp( log(lambda) + gam*(alpha-a_target) )
     }
   }
 
@@ -223,16 +234,16 @@ metropolis <- function(X, y, M, N = 20000, a_target = 0.234, b1 = rep(0, M), bat
 ```
 
 ```{r}
-C = metropolis(X, y, M, N = 20000, a_target = 0.234, b1 = rep(0, M), batch = TRUE)
+C <- metropolis(X, y, N = 20000)
 ```
 
 $\beta$ distribution estimate:
 
 ```{r}
-c = C[,1]
+c <- C[, 1]
 # Plot of density function
 library(ggplot2)
-nbins <- ceiling( (2*n)**(1/3) ) #Terrell-Scott rule for min num bins
+nbins <- ceiling((2 * n)**(1 / 3)) # Terrell-Scott rule for min num bins
 ggplot() +
   geom_histogram(aes(x = c, y = ..density..), bins = nbins, fill = "orange", color = "black", alpha = 0.6) +
   geom_density(aes(x = c), color = "blue", linewidth = 1) +
@@ -253,4 +264,8 @@ Autocorrelation plots
 
 ```{r}
 autocorr.plot(mcmc_obj)
+```
+
+```{r}
+effectiveSize(mcmc_obj)
 ```
