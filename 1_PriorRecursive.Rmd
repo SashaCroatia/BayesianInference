@@ -122,7 +122,8 @@ metropolis <- function(X, y, N = 20000, prior = TRUE, update = FALSE, KDE = FALS
     if (update == FALSE) {
       b_prop <- proposal(mu, lambda, Sigma)
     } else {
-      b_prop <- C[i,]
+      r <- sample(2:N, 1)
+      b_prop <- C[r, ]
     }
     
     #2) Compute transition probability
