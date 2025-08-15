@@ -32,19 +32,20 @@ $$
 
 ```{r}
 #To be set by user:
-n = 2000 #number of observations (set it higher for consistency)
+n <- 2000 #number of observations (set it higher for consistency)
 beta <- c(1, 2, 3)#, 4, 5, 6)  # True coefficients (bias, and predictors) px1
 
 #Synthetic predictors
-p = length(beta)-1 #number of predictors
-M = p+1 #number of predictors plus intercept
+p <- length(beta)-1 #number of predictors
+M <- p+1 #number of predictors plus intercept
 library(MASS)
+set.seed(7)
 X <- cbind(1, matrix(mvrnorm(n, mu = rep(0, p), Sigma = 1*diag(p)), n, p))  # Design matrix with intercept (bias). nxp
 
 #Response
 z <- X %*% beta  # Linear predictor. %*% = matrix mult. nx1 dim
 sig <- 1/(1+exp(-z)) #sigmoid (inv-logit) function, find probability in [0,1], predicted y
-y = rbinom(n=n, size=1, prob=sig) #size=num trials=1 -> bernoulli response var
+y <- rbinom(n=n, size=1, prob=sig) #size=num trials=1 -> bernoulli response var
 ```
 
 ### (ii) HMC sampling
@@ -128,7 +129,7 @@ hmc <- function(X, y, niter = 5000, nburnin = 1000, nchains = 1, inits = NULL) {
 ```
 
 ```{r}
-samples = hmc(X,y)
+samples <- hmc(X,y)
 ```
 
 **References**:
@@ -146,14 +147,14 @@ samples$summary
 **Visualization** of the posterior sample distribution of one of the $\beta_i$:
 
 ```{r}
-c = samples$samples[,1]
-# Plot of density function
+c <- samples$samples[,1]
 library(ggplot2)
-nbins <- ceiling( (2*n)**(1/3) ) #Terrell-Scott rule for min num bins
+h <- 3.5 * sd(c) / (length(c)^(1/3))
+nbins <- ceiling((max(c) - min(c)) / h)
 ggplot() +
-  geom_histogram(aes(x = c, y = ..density..), bins = nbins, fill = "orange", color = "black", alpha = 0.6) +
+  geom_histogram(aes(x = c, y = after_stat(density)), bins = nbins, fill = "orange", color = "black", alpha = 0.6) +
   geom_density(aes(x = c), color = "blue", linewidth = 1) +
-  labs(x = "beta", y = "Density", title = "MCMC Approximation of the Posterior") +
+  labs(x = "l", y = "Density", title = "MCMC Approximation of the Posterior") +
   xlim(min(c), max(c)) +
   theme_minimal()
 ```
