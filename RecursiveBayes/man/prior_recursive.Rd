@@ -12,7 +12,8 @@ prior_recursive(
   N = 20000,
   M = ncol(X),
   a_target = 0.234,
-  b1 = rep(0, M)
+  b1 = rep(0, M),
+  batch_schedule = seq(10, N, by = 10)
 )
 }
 \arguments{
@@ -27,6 +28,8 @@ prior_recursive(
 \item{a_target}{Numeric; target acceptance rate for Metropolis sampler (default \code{0.234}).}
 
 \item{b1}{Numeric vector; initial parameter values for the first partition (default \code{rep(0, M)}).}
+
+\item{batch_schedule}{Frequency of batching dataset for MH}
 }
 \value{
 Numeric matrix of posterior samples from the final stage after all recursive updates.

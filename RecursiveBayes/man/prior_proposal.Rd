@@ -12,7 +12,8 @@ prior_proposal(
   N = 20000,
   M = ncol(X),
   a_target = 0.234,
-  b1 = rep(0, M)
+  b1 = rep(0, M),
+  batch_schedule = seq(10, N, by = 10)
 )
 }
 \arguments{
@@ -29,6 +30,8 @@ prior_proposal(
 \item{a_target}{Numeric. Target acceptance rate for adaptive tuning (default = 0.234).}
 
 \item{b1}{Numeric vector of initial proposal means (default = \code{rep(0, M)}).}
+
+\item{batch_schedule}{Frequency of batching dataset for MH}
 }
 \value{
 A numeric matrix \code{C} containing posterior samples from the last partition's Metropolis-Hastings run.

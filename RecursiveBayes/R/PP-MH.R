@@ -8,13 +8,14 @@
 #' @param M Integer. Number of predictors (default = \code{ncol(X)}).
 #' @param a_target Numeric. Target acceptance rate for adaptive tuning (default = 0.234).
 #' @param b1 Numeric vector of initial proposal means (default = \code{rep(0, M)}).
+#' @param batch_schedule Frequency of batching dataset for MH
 #'
 #' @return
 #' A numeric matrix \code{C} containing posterior samples from the last partition's Metropolis-Hastings run.
 #'
 #' @importFrom stats density approxfun
 #' @export
-prior_proposal <- function(k, X, y, N = 20000, M = ncol(X), a_target = 0.234, b1 = rep(0, M)) {
+prior_proposal <- function(k, X, y, N = 20000, M = ncol(X), a_target = 0.234, b1 = rep(0, M), batch_schedule = seq(10, N, by = 10)) {
   #Partition the data
   #Number of rows
   n <- nrow(X)
@@ -33,7 +34,7 @@ prior_proposal <- function(k, X, y, N = 20000, M = ncol(X), a_target = 0.234, b1
   #Prior recursive implementation
   for (j in seq(1,k)) { 
     if (j == 1) {
-      C <- metropolis(parts_X[[j]], parts_y[[j]], N = N, prior = TRUE, update = FALSE, KDE = FALSE, C = NA, den_funs = NA, a_target = a_target, b1 = b1, batch = TRUE)
+      C <- metropolis(parts_X[[j]], parts_y[[j]], N = N, prior = TRUE, update = FALSE, KDE = FALSE, C = NA, den_funs = NA, a_target = a_target, b1 = b1, batch = TRUE, batch_schedule = batch_schedule)
     
     } else {
       
@@ -52,7 +53,7 @@ prior_proposal <- function(k, X, y, N = 20000, M = ncol(X), a_target = 0.234, b1
       }
       modes <- unlist(modes)
       
-      C <- metropolis(parts_X[[j]], parts_y[[j]], N = N, prior = FALSE, update = TRUE, KDE = FALSE, C = C, den_funs = NA, a_target = a_target, b1 = modes, batch = TRUE)
+      C <- metropolis(parts_X[[j]], parts_y[[j]], N = N, prior = FALSE, update = TRUE, KDE = FALSE, C = C, den_funs = NA, a_target = a_target, b1 = modes, batch = TRUE, batch_schedule = batch_schedule)
       
     }
   }

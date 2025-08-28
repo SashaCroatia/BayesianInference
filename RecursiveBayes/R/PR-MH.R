@@ -7,6 +7,7 @@
 #' @param N Integer; number of MCMC iterations per partition (default \code{20000}).
 #' @param a_target Numeric; target acceptance rate for Metropolis sampler (default \code{0.234}).
 #' @param b1 Numeric vector; initial parameter values for the first partition (default \code{rep(0, M)}).
+#' @param batch_schedule Frequency of batching dataset for MH
 #'
 #' @details
 #' The data are split row-wise into \code{k} roughly equal groups. For the first group, the Metropolis sampler is run with a MVN prior. For subsequent groups, KDEs are fit to the posterior samples from the previous stage, producing univariate priors for each parameter. The prior mean vector is set to the mode of each KDE for the starting values.
@@ -15,7 +16,7 @@
 #'
 #' @importFrom stats density approxfun
 #' @export
-prior_recursive <- function(k, X, y, N = 20000, M = ncol(X), a_target = 0.234, b1 = rep(0, M)) {
+prior_recursive <- function(k, X, y, N = 20000, M = ncol(X), a_target = 0.234, b1 = rep(0, M), batch_schedule = seq(10, N, by = 10)) {
   #Partition the data
   #Number of rows and columns
   n <- nrow(X)
@@ -34,7 +35,7 @@ prior_recursive <- function(k, X, y, N = 20000, M = ncol(X), a_target = 0.234, b
   #Prior recursive implementation
   for (j in seq(1,k)) { 
     if (j == 1) {
-      C <- metropolis(parts_X[[j]], parts_y[[j]], N = N, prior = TRUE, update = FALSE, KDE = FALSE, C = NA, den_funs = NA, a_target = a_target, b1 = b1, batch = TRUE)
+      C <- metropolis(parts_X[[j]], parts_y[[j]], N = N, prior = TRUE, update = FALSE, KDE = FALSE, C = NA, den_funs = NA, a_target = a_target, b1 = b1, batch = TRUE, batch_schedule = batch_schedule)
     
     } else {
       
@@ -50,7 +51,7 @@ prior_recursive <- function(k, X, y, N = 20000, M = ncol(X), a_target = 0.234, b
       }
       modes <- unlist(modes)
       
-      C <- metropolis(parts_X[[j]], parts_y[[j]], N = N, prior = TRUE, update = FALSE, KDE = TRUE, C = C, den_funs = den_funs, a_target = a_target, b1 = modes, batch = TRUE)
+      C <- metropolis(parts_X[[j]], parts_y[[j]], N = N, prior = TRUE, update = FALSE, KDE = TRUE, C = C, den_funs = den_funs, a_target = a_target, b1 = modes, batch = TRUE, batch_schedule = batch_schedule)
       
     }
   }
