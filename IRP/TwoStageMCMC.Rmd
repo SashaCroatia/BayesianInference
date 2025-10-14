@@ -32,7 +32,7 @@ In practice, we estimate the probability distributions of these unknown paramete
 
 ## Why two-stage MCMC?
 
-Two-stage MCMC first partitions the data into subsets, runs a local MCMC on each partition to estimate their parameters, and then in the second stage summarizes the posterior estimates of the parameters to output aggregated distributions. While running a single MCMC on an entire, voluminous dataset would be most optimal, it may be computationally infeasible. The two-stage method breaks the dataset into manageable, parallizable sets. Hepler et al. demonstrate that this recursive approach is computationally more efficient and eliminates the need for approximations or dimension reduction.
+Two-stage MCMC first partitions the data into subsets, runs a local MCMC on each partition to estimate their parameters, and then in the second stage summarizes the posterior estimates of the parameters to output aggregated distributions. While running a single MCMC on an entire, voluminous dataset would be most optimal, it may be computationally infeasible due to finite memory resources. The two-stage method breaks the dataset into manageable, parallizable sets. Hepler et al. demonstrate that this recursive approach is computationally more efficient and eliminates the need for approximations or dimension reduction.
 
 ------------------------------------------------------------------------
 
@@ -787,15 +787,19 @@ ggplot() +
 
 ## Conclusions
 
-Comparing the effect of each of the covariates in $\beta_i$ to the ordinal drought level at each grid location $i$ in Arizona, the single stage and the two stage MCMC algorithms produced visually similar plots. However, the standard deviations of the two stage method for each parameter appear to be slightly higher overall than in the single stage, which is to be expected given that we're not sampling all-at-once. Even so, the difference is slight and for practical purposes our results agree with Hepler et al.s' conclusions that two stage MCMC
+Comparing the effect of each of parameter in $\beta_i$ to the ordinal drought level at each grid location $i$ in Arizona, the single stage and the two stage MCMC algorithms produced visually similar plots. However, we note the following limitations of the two-stage method:
+
+-   the plot of each parameter's standard deviations appear slightly higher overall than in the single stage. This is to be expected given that we're not sampling all-at-once.
+
+-   Hepler et al. mention that since stage 2 uses a regular Metropolis-Hastings update, jointly updating a high-dimensional parameter could greatly lower a sample's acceptance rate. This poor mixing means the MCMC struggles to find other suitable samples in the parameter space.
+
+-   they also mention that the quality of the samples in stage 2 greatly depend on the quality of samples in stage 1. Quality samples means that stage 1 explored the entire parameter space.
+
+Despite these potential drawbacks, in this demonstration we observed only small differences between the samples produced from single and two stage. Assuming our dataset is not too high-dimensional soas to produce poor mixing mentioned above, we recommend the two stage approach because it
 
 -   is computationally efficient due to its potential for parallelization in stage 1.
 
--   effectively still preserves the posterior distribution of the full spatio-temporal model.
-
-<!-- -->
-
--   has real-world applications for large, high-dimensional spatio-temporal data sets.
+-   has real-world applications for very large spatio-temporal data sets.
 
 ------------------------------------------------------------------------
 
