@@ -1,17 +1,20 @@
 ---
-title: "TwoStageMCMC"
+title: "Two Stage MCMC"
 author: "Alexander Berliner"
 date: "2025-10-06"
 output: 
   html_document:
     toc: true
+    toc_depth: 4
     toc_float: true
     number_sections: true
 ---
 
 ## Overview of Two-stage MCMC for Bayesian Inference of Spatio-temporal Ordinal Data
 
-In this document we provide an overview of two-stage MCMC and why it would be advantageous to single-stage MCMC if we're doing Bayesian inference of large spatio-temporal ordinal data. This work follows the comparisons study in *Two-stage MCMC for Fast Bayesian Inference of Large Spatio-temporal Ordinal Data, with Application to US Drought* by Hepler et al. [ref].
+In this document we provide an overview of two-stage MCMC and why it would be advantageous to single-stage MCMC if we're doing Bayesian inference of large spatio-temporal ordinal data. This work follows the comparisons study in *Two-stage MCMC for Fast Bayesian Inference of Large Spatio-temporal Ordinal Data, with Application to US Drought* by Hepler et al. [2].
+
+------------------------------------------------------------------------
 
 ## Why Bayesian?
 
@@ -25,15 +28,19 @@ In spatio-temporal data with complex dependency structures, we might choose a Ba
 
 In practice, we estimate the probability distributions of these unknown parameters using numerical sampling techniques called MCMC.
 
+------------------------------------------------------------------------
+
 ## Why two-stage MCMC?
 
-Two-stage MCMC first partitions the data into subsets, runs a local MCMC on each partition to estimate their parameters, and then in the second stage summarizes the posterior estimates of the parameters to output aggregated distributions. While running a single MCMC on an entire, voluminous dataset would be most optimal, it may be computationally infeasible. Two-stage breaks the dataset into manageable, parallizable sets. Hepler et al. demonstrate that this recursive approach is computationally more efficient and eliminates the need for approximations or dimension reduction.
+Two-stage MCMC first partitions the data into subsets, runs a local MCMC on each partition to estimate their parameters, and then in the second stage summarizes the posterior estimates of the parameters to output aggregated distributions. While running a single MCMC on an entire, voluminous dataset would be most optimal, it may be computationally infeasible. The two-stage method breaks the dataset into manageable, parallizable sets. Hepler et al. demonstrate that this recursive approach is computationally more efficient and eliminates the need for approximations or dimension reduction.
+
+------------------------------------------------------------------------
 
 ## The data
 
 In their paper, Hepler et al. compare single and two stage MCMC on ordinal lattice data where the response indicates drought severity recorded in a spatial lattice.
 
-The spatio-temporal data, USDMDataAvg.csv, can be found [here](https://datadryad.org/stash/dataset/doi:10.5061/dryad.g1jwstqw7). Erhardt et al. created this dataset from the original US Drought Monitor (USDM) from continuous shape files to a discretized spatial support defined by grid cells of size 0.5 degrees latitude by 0.5 degrees longitude [ref]. The response variable is an ordinal measure of the severity of drought in the United States. The USDM levels are:
+The spatio-temporal data, USDMDataAvg.csv, can be found [here](https://datadryad.org/stash/dataset/doi:10.5061/dryad.g1jwstqw7). Erhardt et al. created this dataset from the original US Drought Monitor (USDM) from continuous shape files to a discretized spatial support defined by grid cells of size 0.5 degrees latitude by 0.5 degrees longitude [1]. The response variable is an ordinal measure of the severity of drought in the United States. The USDM levels are:
 
 -   0 = no drought
 
@@ -47,7 +54,7 @@ The spatio-temporal data, USDMDataAvg.csv, can be found [here](https://datadryad
 
 -   D4 = Exceptional drought
 
-For computational ease of demonstration, we only focus on drought levels in Arizona since the beginning of 2020, reflected in the subset datafile USDMData_AZ.csv. The .R file that created this subset data along with the .csv data itself can be found [here](https://github.com/SashaCroatia/BayesianInference/tree/main/IRP).
+To ease the computational demands of this demonstration, in this document we only focus on drought levels in Arizona since the beginning of 2020, reflected in the subset datafile USDMData_AZ.csv. The .R file that created this subset data along with the .csv data itself can be found [here](https://github.com/SashaCroatia/BayesianInference/tree/main/IRP).
 
 Following Hepler et al.s' [code](https://github.com/heplersa/DroughtModelTwoStageMCMC/blob/main/ComparisonStudy/MCMCstandard.R), we read in the data from the csv file and prepare statistics of the covariates to standardize the design matrix:
 
@@ -115,7 +122,7 @@ print(bp)
 
 From the output above, we see that our final design matrix and response consist of an ordinal measure of drought $Y_{i,t}$ with six possible levels at each $i=1,\ldots,I = 125$ areal spatial units (grid cells) for $t=1,\ldots,T=65$ weeks. Additionally, we have 4 covariates (features) in our design matrix to consider: the intercept, evapotranspiration (water moving from land to atmosphere), soil moisture, and soil temperature.
 
-Below is an example of what the ordinal drought levels are for Arizona at $t=1$:
+Below is an example of what the ordinal drought levels are for Arizona at $t=1$, corresponding to the first week of January, 2020:
 
 ```{r}
 #Load packages
@@ -177,6 +184,8 @@ ggplot() +
   )
 ```
 
+------------------------------------------------------------------------
+
 ## Comparing single and two stage MCMC
 
 Following the notation and explanation in Chapter 3 from Hepler et al., for location $i=1,\ldots,I$ and $t = 1,\ldots, T$, we have the following spatio-temporal model for ordinal data:
@@ -188,19 +197,25 @@ $$
 where $I(\text{condition})$ is the indicator function that returns 1 if the condition is true, 0 otherwise, $\alpha = (-\infty,\alpha_1,\alpha_2,\ldots,\alpha_J,\infty)$, and $Y_{i,t}\in \{0,1,\ldots,J\}$ which takes $J+1$ ordered levels. In our example, $J= 5$ with
 
 $$
-Y\_{i,t}\in\{0,1,2,3,4,5\} = \{0, D0, D1, D2, D3, D4\}
+Y_{i,t}\in\{0,1,2,3,4,5\} = \{0, D0, D1, D2, D3, D4\}
 $$ so $\alpha = (-\infty,0,1,2,3,4,\infty)$. The latent (unobserved) continuous drought process is
 
 $$
 Z_{i,t} = \begin{cases}X_{i,t}\boldsymbol{\beta}_i + \epsilon_{i,t}, & \text{for } t = 1 \\[6pt]X_{i,t}\boldsymbol{\beta}_i + \rho_i \big(Z_{i,t-1} - X_{i,t-1}\boldsymbol{\beta}_i\big) + \epsilon_{i,t}, & \text{for } t > 1,\end{cases}
 $$
 
-where $X_{i,t}$ is a $(P+1)$-dimensional vector of covariates including the intercept parameter, $\beta_{i} = (\beta_{0i},\ldots,\beta_{Pi})$ is the location specific, ie the grid cell in Arizona, $(P+1)$-dimensional, spatial random effect vector, $\rho_i$ is a spatial dependent autoregressive term, and errors $\epsilon_{i,t}\sim N(0,\sigma_i^2)$.
+where $X_{i,t}$ is a $(P+1)$-dimensional vector of covariates including the intercept parameter, $\beta_{i} = (\beta_{0i},\ldots,\beta_{Pi})$ is the location specific $(P+1)$-dimensional spatial random effect vector, $\rho_i$ is a spatial dependent autoregressive term, and errors $\epsilon_{i,t}\sim N(0,\sigma_i^2)$. In our example, $P=3$.
 
-Let $\gamma_i = logit(\rho_i)$, $\theta_{Z,i} = (\beta_i,\gamma_i,\sigma_i^2)$ , and $\phi = (\sigma_\gamma^2,\{\sigma_p^2,p = 0,\ldots,P\})$. The full Bayesian hierarchical model of the spatio-temporal is:
+Let $\gamma_i = logit(\rho_i)$, $\theta_{Z,i} = (\beta_i,\gamma_i,\sigma_i^2)$ , and $\phi = (\sigma_\gamma^2,\{\sigma_p^2,p = 0,\ldots,P\})$.
+
+In their paper, Hepler et al. assume $\beta_i$ and $\gamma_i$ independently follow intrinsic conditional autoregressive (ICAR) spatial models. The ICAR model is similar to the CAR model whereby they both analyze spatially correlated local dependency between random variables in areal (lattice) data. For these ICAR priors, we must calculate the adjacency matrix (Queen's adjacency) based on the distance between each spatial coordinate.
+
+Lastly, all variance parameters $\sigma_i^2, \sigma_\gamma^2, \text{and } \sigma_p^2$ follow inverse gamma prior distributions.
+
+Putting this together, the full Bayesian hierarchical model of the spatio-temporal is:
 
 $$
-\begin{aligned}\text{Data Model:} \quad & Y_{1:T} \mid Z_{1:T} \sim f(Y_{1:T} \mid Z_{1:T}), \\[6pt]\text{Process Model:} \quad & Z_{1:T} \mid \boldsymbol{\theta}_Z, X_{1:T} \sim \pi(Z_{1:T} \mid \boldsymbol{\theta}_Z, X_{1:T}), \\[6pt]\text{Prior Models:} \quad & \boldsymbol{\theta}_Z, \boldsymbol{\phi} \sim \pi(\boldsymbol{\theta}_Z \mid \boldsymbol{\phi}) \times \pi(\boldsymbol{\phi}).\end{aligned}
+\begin{aligned}\text{Data Model:} \quad & Y_{1:T} \mid Z_{1:T} \sim f(Y_{1:T} \mid Z_{1:T}), \\[6pt]\text{Process Model:} \quad & Z_{1:T} \mid \boldsymbol{\theta}_Z, X_{1:T} \sim \pi(Z_{1:T} \mid \boldsymbol{\theta}_Z, X_{1:T}), \\[6pt]\text{Prior Models:} \quad & \boldsymbol{\theta}_Z, \boldsymbol{\phi} \sim \pi(\boldsymbol{\theta}_Z \mid \boldsymbol{\phi}) \pi(\boldsymbol{\phi}).\end{aligned}
 $$
 
 The posterior distribution is:
@@ -213,11 +228,15 @@ For more details, please read chapter 3.1 in Hepler et al.'s paper.
 
 ------------------------------------------------------------------------
 
-With our data processing and model setup complete, our goal is to numerically estimate the posterior probability distribution of these unknown parameters using numerical sampling techniques called MCMC. If we didn't have a computationally burdensome dataset, we can simply use a standard *single-stage* *Metropolis-within-Gibbs* MCMC approach (learn about it [here](https://georglsm.r-forge.r-project.org/site-projects/pdf/Hastings_within_Gibbs.pdf)). Otherwise, Hepler et al. suggests we use a two-stage approach, originally proposed by Lunn et al. [ref], which they explain in detail in chapter 3.2.
+With our data processing and model setup complete, our goal is to numerically estimate the posterior probability distribution of these unknown parameters using numerical sampling techniques called MCMC. If we didn't have a computationally burdensome dataset, we can simply use a standard *single-stage* *Metropolis-within-Gibbs* MCMC approach (learn about it [here](https://georglsm.r-forge.r-project.org/site-projects/pdf/Hastings_within_Gibbs.pdf)). Otherwise, Hepler et al. suggests we use a two-stage approach, originally proposed by Lunn et al. [3], which they detail in chapter 3.2.
+
+We make a comparison of single stage and two stage methodologies, following chapter 4 in Hepler et al.
+
+------------------------------------------------------------------------
 
 ### Single Stage
 
-The following implements the Metropolis-within-Gibbs MCMC algorithm which samples directly from the posterior distribution. Find the commented code that implements it in the Appendix.
+The following implements the single-stage Metropolis-within-Gibbs MCMC algorithm which samples directly from the posterior distribution. Find the commented code that implements it in the [Appendix].
 
 Below we take the posterior mean and standard deviaiton of the samples of $\beta_i$.
 
@@ -250,6 +269,8 @@ evp_sd1 <- beta_sd1[,2]
 soilm_sd1 <- beta_sd1[,3]
 tsoil_sd1 <- beta_sd1[,4]
 ```
+
+------------------------------------------------------------------------
 
 #### Intercept
 
@@ -309,9 +330,15 @@ ggplot() +
   )
 ```
 
+------------------------------------------------------------------------
+
+**Note:** To save on space and improve readability, for the remaining plots in this section we omit their corresponding code because they're almost identical.
+
+------------------------------------------------------------------------
+
 #### Evapotranspiration
 
-```{r}
+```{r, echo=FALSE}
 #Combine intercept and coordinates
 plot_df <- data.frame(
   lon = coords$lon,
@@ -339,7 +366,7 @@ ggplot() +
   )
 ```
 
-```{r}
+```{r, echo=FALSE}
 #Combine intercept and coordinates
 plot_df <- data.frame(
   lon = coords$lon,
@@ -367,9 +394,11 @@ ggplot() +
   )
 ```
 
+------------------------------------------------------------------------
+
 #### Soil Moisture
 
-```{r}
+```{r, echo=FALSE}
 #Combine intercept and coordinates
 plot_df <- data.frame(
   lon = coords$lon,
@@ -397,7 +426,7 @@ ggplot() +
   )
 ```
 
-```{r}
+```{r, echo=FALSE}
 #Combine intercept and coordinates
 plot_df <- data.frame(
   lon = coords$lon,
@@ -425,9 +454,11 @@ ggplot() +
   )
 ```
 
+------------------------------------------------------------------------
+
 #### Soil Temperature
 
-```{r}
+```{r, echo=FALSE}
 #Combine intercept and coordinates
 plot_df <- data.frame(
   lon = coords$lon,
@@ -455,7 +486,7 @@ ggplot() +
   )
 ```
 
-```{r}
+```{r, echo=FALSE}
 #Combine intercept and coordinates
 plot_df <- data.frame(
   lon = coords$lon,
@@ -483,11 +514,468 @@ ggplot() +
   )
 ```
 
+------------------------------------------------------------------------
+
+### Two stage
+
+The following implements the two-stage MCMC algorithm. In practice, we would've used an HPC for stage one of the algorithm to take full advantage of the parallel nature of this method, whereby we run an MCMC sampler for each parameter at each spatial location. However, as this is only a demonstration, we ran the code sequentially using a for loop on a local machine. Regardless, after stage 1, re-sampling all the individual samples in stage 2 is fast and can be done locally. Find the commented code that implements it in the Appendix.
+
+Below we take the posterior mean and standard deviaiton of the samples of $\beta_i$.
+
+```{r}
+#Load data and prepare dataset
+load("Stage2Output.Rda")
+avg_beta2 <- apply(beta.out, c(1, 2), mean) #get mean of the posteirors
+sd_beta2 <- apply(beta.out, c(1, 2), sd) #get sd of the posteriors
+
+intercept_avg2 <- avg_beta2[,1]
+evp_avg2 <- avg_beta2[,2]
+soilm_avg2 <- avg_beta2[,3]
+tsoil_avg2 <- avg_beta2[,4]
+
+intercept_sd2 <- sd_beta2[,1]
+evp_sd2 <- sd_beta2[,2]
+soilm_sd2 <- sd_beta2[,3]
+tsoil_sd2 <- sd_beta2[,4]
+```
+
+------------------------------------------------------------------------
+
+#### Intercept
+
+```{r}
+#Combine intercept and coordinates
+plot_df <- data.frame(
+  lon = coords$lon,
+  lat = coords$lat,
+  intercept = intercept_avg2
+)
+
+#Convert to sf
+plot_sf <- st_as_sf(plot_df, coords = c("lon", "lat"), crs = 4326)
+
+#Plot
+ggplot() +
+  geom_sf(data = plot_sf, aes(color = intercept), size = 7, alpha = 0.8, shape = 15) +
+  scale_color_distiller(
+    palette = "RdBu",
+    direction = -1
+  )+
+  geom_sf(data = az_boundary, fill = NA, color = "black", linewidth = 0.7) +
+  ggtitle("Intercept - Two Stage") +
+  coord_sf(xlim = c(-115, -109), ylim = c(31, 37)) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 14, face = "bold"),
+    legend.position = "right"
+  )
+```
+
+```{r}
+#Combine intercept and coordinates
+plot_df <- data.frame(
+  lon = coords$lon,
+  lat = coords$lat,
+  intercept = intercept_sd2
+)
+
+#Convert to sf
+plot_sf <- st_as_sf(plot_df, coords = c("lon", "lat"), crs = 4326)
+
+#Plot
+ggplot() +
+  geom_sf(data = plot_sf, aes(color = intercept), size = 7, alpha = 0.8, shape = 15) +
+  scale_color_distiller(
+    palette = "Greens",
+    direction = 1
+  )+
+  geom_sf(data = az_boundary, fill = NA, color = "black", linewidth = 0.7) +
+  ggtitle("SD of Intercept - Two Stage") +
+  coord_sf(xlim = c(-115, -109), ylim = c(31, 37)) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 14, face = "bold"),
+    legend.position = "right"
+  )
+```
+
+------------------------------------------------------------------------
+
+**Note:** To save on space and improve readability, for the remaining plots in this section we omit their corresponding code because they're almost identical.
+
+------------------------------------------------------------------------
+
+#### Evapotranspiration
+
+```{r, echo=FALSE}
+#Combine intercept and coordinates
+plot_df <- data.frame(
+  lon = coords$lon,
+  lat = coords$lat,
+  evp = evp_avg2
+)
+
+#Convert to sf
+plot_sf <- st_as_sf(plot_df, coords = c("lon", "lat"), crs = 4326)
+
+#Plot
+ggplot() +
+  geom_sf(data = plot_sf, aes(color = evp), size = 7, alpha = 0.8, shape = 15) +
+  scale_color_distiller(
+    palette = "Oranges",
+    direction = -1
+  )+
+  geom_sf(data = az_boundary, fill = NA, color = "black", linewidth = 0.7) +
+  ggtitle("Evapotranspiration - Two Stage") +
+  coord_sf(xlim = c(-115, -109), ylim = c(31, 37)) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 14, face = "bold"),
+    legend.position = "right"
+  )
+```
+
+```{r, echo=FALSE}
+#Combine intercept and coordinates
+plot_df <- data.frame(
+  lon = coords$lon,
+  lat = coords$lat,
+  evp = evp_sd2
+)
+
+#Convert to sf
+plot_sf <- st_as_sf(plot_df, coords = c("lon", "lat"), crs = 4326)
+
+#Plot
+ggplot() +
+  geom_sf(data = plot_sf, aes(color = evp), size = 7, alpha = 0.8, shape = 15) +
+  scale_color_distiller(
+    palette = "Greens",
+    direction = 1
+  )+
+  geom_sf(data = az_boundary, fill = NA, color = "black", linewidth = 0.7) +
+  ggtitle("SD of Evapotranspiration - Two Stage") +
+  coord_sf(xlim = c(-115, -109), ylim = c(31, 37)) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 14, face = "bold"),
+    legend.position = "right"
+  )
+```
+
+------------------------------------------------------------------------
+
+#### Soil Moisture
+
+```{r, echo=FALSE}
+#Combine intercept and coordinates
+plot_df <- data.frame(
+  lon = coords$lon,
+  lat = coords$lat,
+  soilm = soilm_avg2
+)
+
+#Convert to sf
+plot_sf <- st_as_sf(plot_df, coords = c("lon", "lat"), crs = 4326)
+
+#Plot
+ggplot() +
+  geom_sf(data = plot_sf, aes(color = soilm), size = 7, alpha = 0.8, shape = 15) +
+  scale_color_distiller(
+    palette = "RdBu",
+    direction = 1
+  )+
+  geom_sf(data = az_boundary, fill = NA, color = "black", linewidth = 0.7) +
+  ggtitle("Soil Moisture - Two Stage") +
+  coord_sf(xlim = c(-115, -109), ylim = c(31, 37)) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 14, face = "bold"),
+    legend.position = "right"
+  )
+```
+
+```{r, echo=FALSE}
+#Combine intercept and coordinates
+plot_df <- data.frame(
+  lon = coords$lon,
+  lat = coords$lat,
+  soilm = soilm_sd2
+)
+
+#Convert to sf
+plot_sf <- st_as_sf(plot_df, coords = c("lon", "lat"), crs = 4326)
+
+#Plot
+ggplot() +
+  geom_sf(data = plot_sf, aes(color = soilm), size = 7, alpha = 0.8, shape = 15) +
+  scale_color_distiller(
+    palette = "Greens",
+    direction = 1
+  )+
+  geom_sf(data = az_boundary, fill = NA, color = "black", linewidth = 0.7) +
+  ggtitle("SD of Soil Moisture - Two Stage") +
+  coord_sf(xlim = c(-115, -109), ylim = c(31, 37)) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 14, face = "bold"),
+    legend.position = "right"
+  )
+```
+
+------------------------------------------------------------------------
+
+#### Soil Temperature
+
+```{r, echo=FALSE}
+#Combine intercept and coordinates
+plot_df <- data.frame(
+  lon = coords$lon,
+  lat = coords$lat,
+  tsoil = tsoil_avg2
+)
+
+#Convert to sf
+plot_sf <- st_as_sf(plot_df, coords = c("lon", "lat"), crs = 4326)
+
+#Plot
+ggplot() +
+  geom_sf(data = plot_sf, aes(color = tsoil), size = 7, alpha = 0.8, shape = 15) +
+  scale_color_distiller(
+    palette = "RdBu",
+    direction = -1
+  )+
+  geom_sf(data = az_boundary, fill = NA, color = "black", linewidth = 0.7) +
+  ggtitle("Soil Temps - Two Stage") +
+  coord_sf(xlim = c(-115, -109), ylim = c(31, 37)) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 14, face = "bold"),
+    legend.position = "right"
+  )
+```
+
+```{r, echo=FALSE}
+#Combine intercept and coordinates
+plot_df <- data.frame(
+  lon = coords$lon,
+  lat = coords$lat,
+  tsoil = tsoil_sd2
+)
+
+#Convert to sf
+plot_sf <- st_as_sf(plot_df, coords = c("lon", "lat"), crs = 4326)
+
+#Plot
+ggplot() +
+  geom_sf(data = plot_sf, aes(color = tsoil), size = 7, alpha = 0.8, shape = 15) +
+  scale_color_distiller(
+    palette = "Greens",
+    direction = 1
+  )+
+  geom_sf(data = az_boundary, fill = NA, color = "black", linewidth = 0.7) +
+  ggtitle("SD of Soil Temps - Two Stage") +
+  coord_sf(xlim = c(-115, -109), ylim = c(31, 37)) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 14, face = "bold"),
+    legend.position = "right"
+  )
+```
+
+------------------------------------------------------------------------
+
+## Conclusions
+
+Comparing the effect of each of the covariates in $\beta_i$ to the ordinal drought level at each grid location $i$ in Arizona, the single stage and the two stage MCMC algorithms produced visually similar plots. However, the standard deviations of the two stage method for each parameter appear to be slightly higher overall than in the single stage, which is to be expected given that we're not sampling all-at-once. Even so, the difference is slight and for practical purposes our results agree with Hepler et al.s' conclusions that two stage MCMC
+
+-   is computationally efficient due to its potential for parallelization in stage 1.
+
+-   effectively still preserves the posterior distribution of the full spatio-temporal model.
+
+<!-- -->
+
+-   has real-world applications for large, high-dimensional spatio-temporal data sets.
+
+------------------------------------------------------------------------
+
+## References
+
+1.  Erhardt, R., DiVittorio, C. A., Hepler, S. A., Lowman, L. E. L., & Wei, W. (2024). *Homogenized gridded dataset for drought and hydrometeorological modeling for the continental United States*. Scientific Data, 11, Article 375.
+
+2.  Hepler, S., & Erhardt, R. (2025). *Two-stage MCMC for fast Bayesian inference of large spatio-temporal ordinal data, with application to US drought*. arXiv preprint
+
+3.  Lunn, D., Barrett, J., Sweeting, M., and Thompson, S. *Fully Bayesian hierarchical mod- elling in two stages, with application to meta-analysis*. Journal of the Royal Statistical Society. Series C, Applied Statistics, 62(4):551 (2013).
+
+------------------------------------------------------------------------
+
+## Appendix
+
+As we're not seeking the most accurate results in this demonstration, please note the following important modifications to the Hepler et al.'s code to increase computational efficiency. In both the single stage and two stage implementations, rather than slice sampling we use a random walker sampler along with fewer sample iterations.
+
+### Single Stage
+
+Following Hepler et al.'s code [here](https://github.com/heplersa/DroughtModelTwoStageMCMC/blob/main/ComparisonStudy/MCMCstandard.R).
+
+```{r, eval=FALSE}
+# --- 1 ---
+#Load libraries
+library("nimble")
+library("coda")
+
+# --- 2 ---
+#Initial values
+alpha <- c(-Inf,0,1,2,3,4,Inf) #response thresholds
+tau.z <- rep(1,Q) #init latent variable precision
+Z <- 1*(Y - 0.5) #latent Gaussian var, initialized using transformation of Y
+beta <- matrix(NA,Q,bp) #regression coefficients per grid cell. QXbp.
+
+#Initialize beta using OLS:
+for(q in 1:Q) {
+  beta[q,] <- lm(Z[q,] ~ X[seq(q,(Q*Tobs),by=Q),]-1)$coefficients
+  beta[q,which(is.na(beta[q,]))] <- 0
+}
+
+#Initialize another param
+rho.Z <- rep(.95,Q)
+
+# --- 3 ---
+#Compute adjacency matrix based on dist btwn spat coords
+A <- as.matrix(dist(coords))
+A <- 1*((A <= sqrt(0.5)) & (A > 0)) #Queen's adjacency
+num <- colSums(A) #number of neighbors for each grid cell
+
+#Vectorize for NIMBLE
+adj <- NULL
+for(j in 1:Q) {
+  adj <- c(adj,which(A[j,]==1))
+}
+adj <- as.vector(adj)
+num <- as.vector(num)
+weights <- 1+0*adj
+
+# --- 4 ---
+#Setup MCMC
+M.iter <- 10000
+M.burn <- 2000
+M.thin <- 5
+
+#NIMBLE model setup
+mod_data <- list(
+  Y = Y,
+  X = X
+)
+mod_constants <- list(
+  Tobs = Tobs,
+  Q = Q,
+  bp = bp,
+  cut = c(0,1,2,3,4),
+  adj = adj,
+  num = num,
+  weights = weights
+)
+mod_inits <- list(
+  beta = beta,
+  l.rho.z = log(rho.Z/(1-rho.Z)),
+  tau.z = tau.z, Z=1*(Y-.5)
+)
+
+#Model code
+model_code=nimbleCode({
+  for(q in 1:Q){
+    #t = 1
+    mu[q,1] <- inprod(X[q,1:bp],beta[q,1:bp])
+    Z[q,1] ~ dnorm(mu[q,1], tau = tau.z[q])
+    Y[q,1] ~ dinterval(Z[q,1], cut[])
+    
+    #t > 1 
+    for(t in 2:Tobs){
+      mu[q,t] <- inprod(X[Q*(t-1)+q,1:bp],beta[q,1:bp]) + 
+        rho.z[q]*
+        (Z[q,(t-1)]-(inprod(X[Q*(t-2)+q,1:bp], beta[q,1:bp])))
+      Z[q,t] ~ dnorm(mu[q,t], tau = tau.z[q])
+      Y[q,t] ~ dinterval(Z[q,t], cut[])
+    }
+  }
+  
+  #ICAR priors for each beta
+  for(p in 1:bp){
+    beta[1:Q,p] ~ dcar_normal(adj[], weights[], num[], tau.b[p], zero_mean=0)
+    tau.b[p] ~ dgamma(.01,.01)
+  }
+  
+  #ICAR prior for logit(rho.z)
+  l.rho.z[1:Q] ~ dcar_normal(adj[], weights[], num[], tau.lr, zero_mean=0)
+  tau.lr ~ dgamma(.01,.01)
+  
+  for (q in 1:Q) {
+    rho.z[q] <- exp(l.rho.z[q])/(1+exp(l.rho.z[q]))
+    tau.z[q] ~ dgamma(.01,.01)
+  }
+})
+
+#Compile & configure MCMC
+nimble_model <- nimbleModel(model_code, mod_constants, mod_data, mod_inits)
+compiled_model <- compileNimble(nimble_model,resetFunctions = TRUE)
+mcmc_conf <- configureMCMC(
+  nimble_model,
+  monitors = c('beta','rho.z','tau.z','Z'),
+  control = list(
+    adaptive = TRUE, #enable adaptive tuning of sampler step sizes during burn-in
+    scale = 0.1, #initial scale for adaptive sampler
+    adaptInterval = 100, #update sampler tuning every 100 iter
+    sliceMaxSteps = 100000,
+    maxContractions = 100000,
+    sliceWidth = 1
+  ),
+  useConjugacy = TRUE
+)
+
+# --- 5 ---
+#Build & compile
+st1 <- Sys.time()
+nimble_mcmc <- buildMCMC(mcmc_conf)
+compiled_mcmc <- compileNimble(
+  nimble_mcmc,
+  project = nimble_model,
+  resetFunctions = TRUE
+)
+
+# --- 6 ---
+#Run MCMC
+st2 <- Sys.time()
+
+samples = runMCMC(
+  compiled_mcmc,
+  inits = mod_inits,
+  nchains = 1,
+  nburnin = M.burn,
+  niter = M.iter,
+  samplesAsCodaMCMC = TRUE,
+  thin = M.thin,
+  summary = FALSE,
+  WAIC = FALSE,
+  progressBar = TRUE
+)
+  
+time.out.total <- Sys.time() - st1
+time.out.run <- Sys.time() - st2
+
+save(
+  samples,
+  time.out.total,
+  time.out.run,
+  file = "MCMCoutputStandard2.Rda"
+)
+```
+
 ### Two stage
 
 #### Stage 1
 
-```{r}
+Following Hepler et al.'s code [here](https://github.com/heplersa/DroughtModelTwoStageMCMC/blob/main/ComparisonStudy/MCMCstage1.R)
+
+```{r, eval=FALSE}
 # --- 1 ---
 #now can do MCMC for grid cell q
 st<- Sys.time()
@@ -647,7 +1135,9 @@ for(q in 1:Q) {
 
 #### Stage 2
 
-```{r}
+Following Hepler et al.'s code [here](https://github.com/heplersa/DroughtModelTwoStageMCMC/blob/main/ComparisonStudy/MCMCstage2.R)
+
+```{r, eval=FALSE}
 # --- 1 ---
 #Load libs
 library(invgamma)
@@ -677,9 +1167,7 @@ for(q in 1:n){
 
 # convert rho.Z to gamma samples
 gamma.samp = log(rho.Z.samp/(1-rho.Z.samp))
-```
 
-```{r}
 # --- 3 ---
 #need to construct adjacency matrix
 #need adjacency matrix for grid cells and number of neighbors of each...
@@ -764,285 +1252,4 @@ close(progress_bar)
 time.out <- Sys.time()-st
 
 save(time.out,Z.out,sigma.sq.out,beta.out,rho.Z.out,tausq.b.out,tausq.g.out,file="Stage2Output.Rda")
-```
-
-```{r}
-#Load data and prepare dataset
-load("Stage2Output.Rda")
-avg_beta2 <- apply(beta.out, c(1, 2), mean) #get mean of the posteirors
-
-intercept_avg2 <- avg_beta2[,1]
-evp_avg2 <- avg_beta2[,2]
-soilm_avg2 <- avg_beta2[,3]
-tsoil_avg2 <- avg_beta2[,4]
-```
-
-```{r}
-#Combine intercept and coordinates
-plot_df <- data.frame(
-  lon = coords$lon,
-  lat = coords$lat,
-  intercept = intercept_avg2
-)
-
-#Convert to sf
-plot_sf <- st_as_sf(plot_df, coords = c("lon", "lat"), crs = 4326)
-
-#Plot
-ggplot() +
-  geom_sf(data = plot_sf, aes(color = intercept), size = 7, alpha = 0.8, shape = 15) +
-  scale_color_distiller(
-    palette = "RdBu",
-    direction = -1
-  )+
-  geom_sf(data = az_boundary, fill = NA, color = "black", linewidth = 0.7) +
-  ggtitle("Intercept - Two Stage") +
-  coord_sf(xlim = c(-115, -109), ylim = c(31, 37)) +
-  theme_minimal() +
-  theme(
-    plot.title = element_text(size = 14, face = "bold"),
-    legend.position = "right"
-  )
-```
-
-```{r}
-#Combine intercept and coordinates
-plot_df <- data.frame(
-  lon = coords$lon,
-  lat = coords$lat,
-  evp = evp_avg2
-)
-
-#Convert to sf
-plot_sf <- st_as_sf(plot_df, coords = c("lon", "lat"), crs = 4326)
-
-#Plot
-ggplot() +
-  geom_sf(data = plot_sf, aes(color = evp), size = 7, alpha = 0.8, shape = 15) +
-  scale_color_distiller(
-    palette = "RdBu",
-    direction = 1
-  )+
-  geom_sf(data = az_boundary, fill = NA, color = "black", linewidth = 0.7) +
-  ggtitle("Evapotranspiration - Two Stage") +
-  coord_sf(xlim = c(-115, -109), ylim = c(31, 37)) +
-  theme_minimal() +
-  theme(
-    plot.title = element_text(size = 14, face = "bold"),
-    legend.position = "right"
-  )
-```
-
-```{r}
-#Combine intercept and coordinates
-plot_df <- data.frame(
-  lon = coords$lon,
-  lat = coords$lat,
-  soilm = soilm_avg2
-)
-
-#Convert to sf
-plot_sf <- st_as_sf(plot_df, coords = c("lon", "lat"), crs = 4326)
-
-#Plot
-ggplot() +
-  geom_sf(data = plot_sf, aes(color = soilm), size = 7, alpha = 0.8, shape = 15) +
-  scale_color_distiller(
-    palette = "RdBu",
-    direction = 1
-  )+
-  geom_sf(data = az_boundary, fill = NA, color = "black", linewidth = 0.7) +
-  ggtitle("Soil Moisture - Two Stage") +
-  coord_sf(xlim = c(-115, -109), ylim = c(31, 37)) +
-  theme_minimal() +
-  theme(
-    plot.title = element_text(size = 14, face = "bold"),
-    legend.position = "right"
-  )
-```
-
-```{r}
-#Combine intercept and coordinates
-plot_df <- data.frame(
-  lon = coords$lon,
-  lat = coords$lat,
-  tsoil = tsoil_avg2
-)
-
-#Convert to sf
-plot_sf <- st_as_sf(plot_df, coords = c("lon", "lat"), crs = 4326)
-
-#Plot
-ggplot() +
-  geom_sf(data = plot_sf, aes(color = tsoil), size = 7, alpha = 0.8, shape = 15) +
-  scale_color_distiller(
-    palette = "RdBu",
-    direction = -1
-  )+
-  geom_sf(data = az_boundary, fill = NA, color = "black", linewidth = 0.7) +
-  ggtitle("Soil Temps - Two Stage") +
-  coord_sf(xlim = c(-115, -109), ylim = c(31, 37)) +
-  theme_minimal() +
-  theme(
-    plot.title = element_text(size = 14, face = "bold"),
-    legend.position = "right"
-  )
-```
-
-## References
-
-## Appendix
-
-### Single Stage
-
-```{r, eval=FALSE}
-# --- 1 ---
-#Load libraries
-library("nimble")
-library("coda")
-
-# --- 2 ---
-#Initial values
-alpha <- c(-Inf,0,1,2,3,4,Inf) #response thresholds
-tau.z <- rep(1,Q) #init latent variable precision
-Z <- 1*(Y - 0.5) #latent Gaussian var, initialized using transformation of Y
-beta <- matrix(NA,Q,bp) #regression coefficients per grid cell. QXbp.
-
-#Initialize beta using OLS:
-for(q in 1:Q) {
-  beta[q,] <- lm(Z[q,] ~ X[seq(q,(Q*Tobs),by=Q),]-1)$coefficients
-  beta[q,which(is.na(beta[q,]))] <- 0
-}
-
-#Initialize another param
-rho.Z <- rep(.95,Q)
-
-# --- 3 ---
-#Compute adjacency matrix based on dist btwn spat coords
-A <- as.matrix(dist(coords))
-A <- 1*((A <= sqrt(0.5)) & (A > 0)) #Queen's adjacency
-num <- colSums(A) #number of neighbors for each grid cell
-
-#Vectorize for NIMBLE
-adj <- NULL
-for(j in 1:Q) {
-  adj <- c(adj,which(A[j,]==1))
-}
-adj <- as.vector(adj)
-num <- as.vector(num)
-weights <- 1+0*adj
-
-# --- 4 ---
-#Setup MCMC
-M.iter <- 10000
-M.burn <- 2000
-M.thin <- 5
-
-#NIMBLE model setup
-mod_data <- list(
-  Y = Y,
-  X = X
-)
-mod_constants <- list(
-  Tobs = Tobs,
-  Q = Q,
-  bp = bp,
-  cut = c(0,1,2,3,4),
-  adj = adj,
-  num = num,
-  weights = weights
-)
-mod_inits <- list(
-  beta = beta,
-  l.rho.z = log(rho.Z/(1-rho.Z)),
-  tau.z = tau.z, Z=1*(Y-.5)
-)
-
-#Model code
-model_code=nimbleCode({
-  for(q in 1:Q){
-    #t = 1
-    mu[q,1] <- inprod(X[q,1:bp],beta[q,1:bp])
-    Z[q,1] ~ dnorm(mu[q,1], tau = tau.z[q])
-    Y[q,1] ~ dinterval(Z[q,1], cut[])
-    
-    #t > 1 
-    for(t in 2:Tobs){
-      mu[q,t] <- inprod(X[Q*(t-1)+q,1:bp],beta[q,1:bp]) + 
-        rho.z[q]*
-        (Z[q,(t-1)]-(inprod(X[Q*(t-2)+q,1:bp], beta[q,1:bp])))
-      Z[q,t] ~ dnorm(mu[q,t], tau = tau.z[q])
-      Y[q,t] ~ dinterval(Z[q,t], cut[])
-    }
-  }
-  
-  #ICAR priors for each beta
-  for(p in 1:bp){
-    beta[1:Q,p] ~ dcar_normal(adj[], weights[], num[], tau.b[p], zero_mean=0)
-    tau.b[p] ~ dgamma(.01,.01)
-  }
-  
-  #ICAR prior for logit(rho.z)
-  l.rho.z[1:Q] ~ dcar_normal(adj[], weights[], num[], tau.lr, zero_mean=0)
-  tau.lr ~ dgamma(.01,.01)
-  
-  for (q in 1:Q) {
-    rho.z[q] <- exp(l.rho.z[q])/(1+exp(l.rho.z[q]))
-    tau.z[q] ~ dgamma(.01,.01)
-  }
-})
-
-#Compile & configure MCMC
-nimble_model <- nimbleModel(model_code, mod_constants, mod_data, mod_inits)
-compiled_model <- compileNimble(nimble_model,resetFunctions = TRUE)
-mcmc_conf <- configureMCMC(
-  nimble_model,
-  monitors = c('beta','rho.z','tau.z','Z'),
-  control = list(
-    adaptive = TRUE, #enable adaptive tuning of sampler step sizes during burn-in
-    scale = 0.1, #initial scale for adaptive sampler
-    adaptInterval = 100, #update sampler tuning every 100 iter
-    sliceMaxSteps = 100000,
-    maxContractions = 100000,
-    sliceWidth = 1
-  ),
-  useConjugacy = TRUE
-)
-
-# --- 5 ---
-#Build & compile
-st1 <- Sys.time()
-nimble_mcmc <- buildMCMC(mcmc_conf)
-compiled_mcmc <- compileNimble(
-  nimble_mcmc,
-  project = nimble_model,
-  resetFunctions = TRUE
-)
-
-# --- 6 ---
-#Run MCMC
-st2 <- Sys.time()
-
-samples = runMCMC(
-  compiled_mcmc,
-  inits = mod_inits,
-  nchains = 1,
-  nburnin = M.burn,
-  niter = M.iter,
-  samplesAsCodaMCMC = TRUE,
-  thin = M.thin,
-  summary = FALSE,
-  WAIC = FALSE,
-  progressBar = TRUE
-)
-  
-time.out.total <- Sys.time() - st1
-time.out.run <- Sys.time() - st2
-
-save(
-  samples,
-  time.out.total,
-  time.out.run,
-  file = "MCMCoutputStandard2.Rda"
-)
 ```
