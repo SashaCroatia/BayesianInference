@@ -1,0 +1,874 @@
+---
+title: "TwoStageMCMC"
+author: "Alexander Berliner"
+date: "2025-10-06"
+output: html_document
+---
+
+# Overview of Two-stage MCMC for Bayesian Inference of Spatio-temporal Ordinal Data
+
+In this document we provide an overview of two-stage MCMC and why it would be advantageous to single-stage MCMC if we're doing Bayesian inference of large spatio-temporal ordinal data. This work follows the comparisons study in *Two-stage MCMC for Fast Bayesian Inference of Large Spatio-temporal Ordinal Data, with Application to US Drought* by Hepler et al. [ref].
+
+## Why Bayesian?
+
+In spatio-temporal data with complex dependency structures, we might choose a Bayesian approach because:
+
+-   It allows us to quantify uncertainty of parameters based off their full distributions.
+
+-   It incorporates hierarchical structures of random effects.
+
+-   Our prior information could improve inference.
+
+In practice, we estimate the probability distributions of these unknown parameters using numerical sampling techniques called MCMC.
+
+## Why two-stage MCMC?
+
+Two-stage MCMC first partitions the data into subsets, runs a local MCMC on each partition to estimate their parameters, and then in the second stage summarizes the posterior estimates of the parameters to output aggregated distributions. While running a single MCMC on an entire, voluminous dataset would be most optimal, it may be computationally infeasible. Two-stage breaks the dataset into manageable, parallizable sets. Hepler et al. demonstrate that this recursive approach is computationally more efficient and eliminates the need for approximations or dimension reduction.
+
+## Comparing single and two stage MCMC
+
+In their paper, Hepler et al. compare single and two stage MCMC on ordinal lattice data where the response indicates drought severity recorded in a spatial lattice.
+
+### The data
+
+The data is from USDMDataAvg.csv found from <https://datadryad.org/stash/dataset/doi>[:10.5061/dryad.g1jwstqw7](https://datadryad.org/stash/dataset/doi:10.5061/dryad.g1jwstqw7) . The response variable is an ordinal measure of the severity of drought in the United States called the US Drought Monitor (USDM). The USDM levels are:
+
+-   0 = no drought
+
+-   D0 = abnormally dryd
+
+-   D1 = moderate drought
+
+-   D2 = Sever drought
+
+-   D3 = Extreme drought
+
+-   D4 = Exceptional drought
+
+For demonstration, we only focus on drought levels in Arizona since the beginning of 2020, reflected in the subset datafile USDMData_AZ.csv.
+
+```{r}
+data <- read.csv("USDMData_AZ.csv")
+
+#get means and standard deviations of covariates which will be used to standardize design matrix
+means <- apply(data[,6:ncol(data)],2,mean, na.rm=TRUE)
+sds <- apply(data[,6:ncol(data)],2,sd, na.rm=TRUE)
+scalingvalues <- data.frame(means, sds)
+rownames(scalingvalues) <- colnames(data[6:ncol(data)])
+
+training <- data[which(data$time<20210400),] #data to model
+training$timeID <- as.numeric(as.factor(training$time))
+
+gridID <- training$grid[which(training$timeID==1)]
+coords <- training[which(training$timeID==1),c("lon","lat")]
+
+#Set up standardized design matrix
+Q <- length(gridID) #number of spatial grid cells
+Tobs <- nrow(training)/Q #number of time points
+
+vars <- c("evp","soilm","tsoil") #covars to include
+Xcov <- cbind(training[,vars]) #subset covars
+J <- ncol(Xcov) #number of covars
+
+#retrieve mean and sd for each selected covar
+#used to standardize each covar
+Xm <- rep(0,J)
+Xs <- rep(0,J)
+for(j in 1:J){
+  Xm[j] = scalingvalues$means[which(rownames(scalingvalues)==vars[j])]
+  Xs[j] = scalingvalues$sds[which(rownames(scalingvalues)==vars[j])]
+}
+
+#standardize covars
+Xfull <- matrix(NA,Q*Tobs,J)
+for(j in 1:(J)){
+  Xfull[,j] = (Xcov[,j]-Xm[j])/Xs[j]
+}
+
+#encode drought classification into ordered factor
+training$droughtID <- factor(
+  training$drought,
+  levels=c("0","D0","D1","D2","D3","D4")
+)
+yfull <- as.numeric(training$droughtID)-1
+
+# -- Final design matrices for modeling --
+X <- cbind(rep(1,Tobs),Xfull) #includes intercept col, giving dimensions (J+1)
+Y <- matrix(yfull,Q,Tobs) #response is 
+
+D <- 5 #6 total drought levels, 0-5
+bp <- dim(X)[2] #number of regression parameters
+
+print(Q)
+print(Tobs)
+print(bp)
+```
+
+Our final data consists of discretized spatial support defined by grid cells of size 0.5 degrees latitude by 0.5 degrees longitude. At each cell is an ordinal measure of drought $Y_{i,t}$ with six possible levels with $i=1,\ldots,125$ areal spatial units and $t=1,\ldots,117$ weeks. Below is an example of what this looks like at $t=1$:
+
+```{r}
+#Load packages
+library("sf")
+library("ggplot2")
+library("ggmap")
+library("spData")
+
+#Select one time period
+time_choice <- 1 #select first time stamp
+plot_data <- training[training$timeID == time_choice, ]
+
+#convert to sf object
+plot_sf <- st_as_sf(plot_data, coords = c("lon", "lat"), crs = 4326)
+
+#Ensure droughtID is a factor (ordinal)
+plot_sf$droughtID <- factor(
+  plot_sf$droughtID, 
+  levels = c("0", "D0", "D1", "D2", "D3", "D4")
+)
+
+#Get Arizona boundary
+data("us_states", package = "spData")
+az_boundary <- us_states[us_states$NAME == "Arizona", ]
+az_boundary <- st_transform(az_boundary, crs = 4326)
+
+#Plot
+ggplot() +
+  geom_sf(
+    data = plot_sf,
+    aes(color = droughtID),
+    size = 7,
+    alpha = 0.8,
+    shape = 15
+  ) +
+  scale_color_manual(
+    values = c(
+      "0" = "lightblue",
+      "D0" = "yellow",
+      "D1" = "orange",
+      "D2" = "red",
+      "D3" = "darkred",
+      "D4" = "brown"
+    ),
+    name = "Drought Level"
+  ) +
+  geom_sf(
+    data = az_boundary,
+    fill = NA,
+    color = "black",
+    linewidth = 0.7
+  ) +
+  ggtitle(paste("Arizona Drought Severity at Time Period", time_choice)) +
+  coord_sf(xlim = c(-115, -109), ylim = c(31, 37)) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 14, face = "bold"),
+    legend.position = "right"
+  )
+```
+
+### Single Stage
+
+```{r}
+# --- 1 ---
+#Load libraries
+library("nimble")
+library("coda")
+
+# --- 2 ---
+#Initial values
+alpha <- c(-Inf,0,1,2,3,4,Inf) #response thresholds
+tau.z <- rep(1,Q) #init latent variable precision
+Z <- 1*(Y - 0.5) #latent Gaussian var, initialized using transformation of Y
+beta <- matrix(NA,Q,bp) #regression coefficients per grid cell. QXbp.
+
+#Initialize beta using OLS:
+for(q in 1:Q) {
+  beta[q,] <- lm(Z[q,] ~ X[seq(q,(Q*Tobs),by=Q),]-1)$coefficients
+  beta[q,which(is.na(beta[q,]))] <- 0
+}
+
+#Initialize another param
+rho.Z <- rep(.95,Q)
+```
+
+```{r}
+# --- 3 ---
+#Compute adjacency matrix based on dist btwn spat coords
+A <- as.matrix(dist(coords))
+A <- 1*((A <= sqrt(0.5)) & (A > 0)) #Queen's adjacency
+num <- colSums(A) #number of neighbors for each grid cell
+
+#Vectorize for NIMBLE
+adj <- NULL
+for(j in 1:Q) {
+  adj <- c(adj,which(A[j,]==1))
+}
+adj <- as.vector(adj)
+num <- as.vector(num)
+weights <- 1+0*adj
+
+# --- 4 ---
+#Setup MCMC
+M.iter <- 10000
+M.burn <- 2000
+M.thin <- 5
+
+#NIMBLE model setup
+mod_data <- list(
+  Y = Y,
+  X = X
+)
+mod_constants <- list(
+  Tobs = Tobs,
+  Q = Q,
+  bp = bp,
+  cut = c(0,1,2,3,4),
+  adj = adj,
+  num = num,
+  weights = weights
+)
+mod_inits <- list(
+  beta = beta,
+  l.rho.z = log(rho.Z/(1-rho.Z)),
+  tau.z = tau.z, Z=1*(Y-.5)
+)
+
+#Model code
+model_code=nimbleCode({
+  for(q in 1:Q){
+    #t = 1
+    mu[q,1] <- inprod(X[q,1:bp],beta[q,1:bp])
+    Z[q,1] ~ dnorm(mu[q,1], tau = tau.z[q])
+    Y[q,1] ~ dinterval(Z[q,1], cut[])
+    
+    #t > 1 
+    for(t in 2:Tobs){
+      mu[q,t] <- inprod(X[Q*(t-1)+q,1:bp],beta[q,1:bp]) + 
+        rho.z[q]*
+        (Z[q,(t-1)]-(inprod(X[Q*(t-2)+q,1:bp], beta[q,1:bp])))
+      Z[q,t] ~ dnorm(mu[q,t], tau = tau.z[q])
+      Y[q,t] ~ dinterval(Z[q,t], cut[])
+    }
+  }
+  
+  #ICAR priors for each beta
+  for(p in 1:bp){
+    beta[1:Q,p] ~ dcar_normal(adj[], weights[], num[], tau.b[p], zero_mean=0)
+    tau.b[p] ~ dgamma(.01,.01)
+  }
+  
+  #ICAR prior for logit(rho.z)
+  l.rho.z[1:Q] ~ dcar_normal(adj[], weights[], num[], tau.lr, zero_mean=0)
+  tau.lr ~ dgamma(.01,.01)
+  
+  for (q in 1:Q) {
+    rho.z[q] <- exp(l.rho.z[q])/(1+exp(l.rho.z[q]))
+    tau.z[q] ~ dgamma(.01,.01)
+  }
+})
+
+#Compile & configure MCMC
+nimble_model <- nimbleModel(model_code, mod_constants, mod_data, mod_inits)
+compiled_model <- compileNimble(nimble_model,resetFunctions = TRUE)
+mcmc_conf <- configureMCMC(
+  nimble_model,
+  monitors = c('beta','rho.z','tau.z','Z'),
+  control = list(
+    adaptive = TRUE, #enable adaptive tuning of sampler step sizes during burn-in
+    scale = 0.1, #initial scale for adaptive sampler
+    adaptInterval = 100, #update sampler tuning every 100 iter
+    sliceMaxSteps = 100000,
+    maxContractions = 100000,
+    sliceWidth = 1
+  ),
+  useConjugacy = TRUE
+)
+```
+
+```{r}
+# --- 5 ---
+#Build & compile
+st1 <- Sys.time()
+nimble_mcmc <- buildMCMC(mcmc_conf)
+compiled_mcmc <- compileNimble(
+  nimble_mcmc,
+  project = nimble_model,
+  resetFunctions = TRUE
+)
+```
+
+```{r warning=FALSE}
+# --- 6 ---
+#Run MCMC
+st2 <- Sys.time()
+
+samples = runMCMC(
+  compiled_mcmc,
+  inits = mod_inits,
+  nchains = 1,
+  nburnin = M.burn,
+  niter = M.iter,
+  samplesAsCodaMCMC = TRUE,
+  thin = M.thin,
+  summary = FALSE,
+  WAIC = FALSE,
+  progressBar = TRUE
+)
+  
+time.out.total <- Sys.time() - st1
+time.out.run <- Sys.time() - st2
+```
+
+```{r}
+save(
+  samples,
+  time.out.total,
+  time.out.run,
+  file = "MCMCoutputStandard2.Rda"
+)
+```
+
+```{r}
+#Load data and prepare dataset
+load("MCMCoutputStandard2.Rda")
+
+#Create beta_array
+samples_df = data.frame(samples)
+n_iter <- nrow(samples)
+beta_array <- array(NA, dim = c(Q, bp, n_iter))
+for (j in 1:bp) {
+  for (i in 1:Q) {
+    col_name <- paste0("beta.", i, "..", j, ".")
+    beta_array[i, j, ] <- samples_df[[col_name]]
+  }
+}
+
+#Get mean of the posteriors
+beta_avg1 <- apply(beta_array, c(1, 2), mean) #get mean of the posteirors
+intercept_avg1 <- beta_avg1[,1]
+evp_avg1 <- beta_avg1[,2]
+soilm_avg1 <- beta_avg1[,3]
+tsoil_avg1 <- beta_avg1[,4]
+```
+
+```{r}
+#Combine intercept and coordinates
+plot_df <- data.frame(
+  lon = coords$lon,
+  lat = coords$lat,
+  intercept = intercept_avg1
+)
+
+#Convert to sf
+plot_sf <- st_as_sf(plot_df, coords = c("lon", "lat"), crs = 4326)
+
+#Plot
+ggplot() +
+  geom_sf(data = plot_sf, aes(color = intercept), size = 7, alpha = 0.8, shape = 15) +
+  scale_color_distiller(
+    palette = "RdBu",
+    direction = -1
+  )+
+  geom_sf(data = az_boundary, fill = NA, color = "black", linewidth = 0.7) +
+  ggtitle("Intercept - Single Stage") +
+  coord_sf(xlim = c(-115, -109), ylim = c(31, 37)) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 14, face = "bold"),
+    legend.position = "right"
+  )
+```
+
+```{r}
+#Combine intercept and coordinates
+plot_df <- data.frame(
+  lon = coords$lon,
+  lat = coords$lat,
+  evp = evp_avg1
+)
+
+#Convert to sf
+plot_sf <- st_as_sf(plot_df, coords = c("lon", "lat"), crs = 4326)
+
+#Plot
+ggplot() +
+  geom_sf(data = plot_sf, aes(color = evp), size = 7, alpha = 0.8, shape = 15) +
+  scale_color_distiller(
+    palette = "RdBu",
+    direction = 1
+  )+
+  geom_sf(data = az_boundary, fill = NA, color = "black", linewidth = 0.7) +
+  ggtitle("Evapotranspiration - Single Stage") +
+  coord_sf(xlim = c(-115, -109), ylim = c(31, 37)) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 14, face = "bold"),
+    legend.position = "right"
+  )
+```
+
+```{r}
+#Combine intercept and coordinates
+plot_df <- data.frame(
+  lon = coords$lon,
+  lat = coords$lat,
+  soilm = soilm_avg1
+)
+
+#Convert to sf
+plot_sf <- st_as_sf(plot_df, coords = c("lon", "lat"), crs = 4326)
+
+#Plot
+ggplot() +
+  geom_sf(data = plot_sf, aes(color = soilm), size = 7, alpha = 0.8, shape = 15) +
+  scale_color_distiller(
+    palette = "RdBu",
+    direction = 1
+  )+
+  geom_sf(data = az_boundary, fill = NA, color = "black", linewidth = 0.7) +
+  ggtitle("Soil Moisture - Single Stage") +
+  coord_sf(xlim = c(-115, -109), ylim = c(31, 37)) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 14, face = "bold"),
+    legend.position = "right"
+  )
+```
+
+```{r}
+#Combine intercept and coordinates
+plot_df <- data.frame(
+  lon = coords$lon,
+  lat = coords$lat,
+  tsoil = tsoil_avg1
+)
+
+#Convert to sf
+plot_sf <- st_as_sf(plot_df, coords = c("lon", "lat"), crs = 4326)
+
+#Plot
+ggplot() +
+  geom_sf(data = plot_sf, aes(color = tsoil), size = 7, alpha = 0.8, shape = 15) +
+  scale_color_distiller(
+    palette = "RdBu",
+    direction = -1
+  )+
+  geom_sf(data = az_boundary, fill = NA, color = "black", linewidth = 0.7) +
+  ggtitle("Soil Temps - Single Stage") +
+  coord_sf(xlim = c(-115, -109), ylim = c(31, 37)) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 14, face = "bold"),
+    legend.position = "right"
+  )
+```
+
+### Two stage
+
+#### Stage 1
+
+```{r}
+# --- 1 ---
+#now can do MCMC for grid cell q
+st<- Sys.time()
+
+#running as array job; this picks the individual grid used in each part of the array
+for(q in 1:Q) {
+    
+  #extract design matrix and response variable for this grid cell
+  II = seq(q,(Q*Tobs),by=Q)
+  X = cbind(rep(1,Tobs),Xfull[II,])
+  Y = yfull[II]
+  
+  D = 5 #6 total drought levels
+  bp = dim(X)[2]
+  
+  # --- 2 ---
+  #set initial values
+  alpha = c(-Inf,0,1,2,3,4,Inf)
+  tau.z = 1
+  Z = 1*(Y - 0.5)
+  
+  #use the AR(1) estimates as initial values for model parameters
+  fit = arima(Z,order=c(1,0,0),xreg=X[,2:4])
+  rho.Z = fit$coef[1]
+  beta = fit$coef[2:5]
+  #if outputs NA give different initial values
+  if(is.na(sum(beta))){
+    beta[1] = Z
+    beta[2:ncol(X)]=0
+    rho.Z=.98
+  }
+  
+  ## --- 3 ---
+  #Set up MCMC
+  M.iter <- 10000
+  M.burn <- 2000
+  M.thin <- 4
+  
+  mod_data <- list(
+    Y=Y,
+    X=X
+  )
+  mod_constants <- list(
+    Tobs = Tobs,
+    bp=bp,
+    cut=c(0,1,2,3,4)
+  )
+  mod_inits <- list(
+    beta = beta,
+    rho.z = rho.Z,
+    tau.z = tau.z,
+    Z = 1*(Y-.5)
+  )
+  
+  # --- 4 ---
+  #Model code
+  model_code <- nimbleCode({
+    #Drought Variable
+    for(t in 1:Tobs){
+      Y[t] ~ dinterval(Z[t], cut[])
+    }
+    
+    #Latent Gaussian Variable
+    mu[1] <- inprod(X[1,1:bp],beta[1:bp])
+    Z[1] ~ dnorm(mu[1], tau = tau.z)
+    for(t in 2:Tobs){
+      mu[t] <- inprod(X[t,1:bp],beta[1:bp]) +
+        rho.z*(Z[(t-1)] - (inprod(X[(t-1),1:bp], beta[1:bp])))
+      Z[t] ~ dnorm(mu[t], tau = tau.z)
+    }
+    
+    #prior distribution for beta, i indexes each element of beta
+    for (b in 1:bp){
+      beta[b] ~ dnorm(0, tau = 1/9)
+    }
+    
+    #prior distribution for tau.z
+    tau.z ~ dgamma(0.01, 0.01)
+    
+    #prior distribution for rho, not rho ~ U(0,1) = gamma ~ logistic(0,1)
+    gamma ~ dlogis(0,1)
+    rho.z <- exp(gamma)/(1+exp(gamma))
+  })
+  
+  nimble_model <- nimbleModel(
+    model_code,
+    mod_constants,
+    mod_data,
+    mod_inits
+  )
+  
+  # --- 5 ---
+  #Compile MCMC
+  compiled_model <- compileNimble(
+    nimble_model,
+    resetFunctions = TRUE
+  )
+  mcmc_conf <- configureMCMC(
+    nimble_model,
+    monitors = c('beta','rho.z','tau.z','Z'),
+    control = list(
+      adaptive=TRUE,
+      scale=0.1,
+      adaptInterval=100,
+      sliceMaxSteps=100000,
+      maxContractions=100000,
+      sliceWidth=1),
+    useConjugacy = TRUE
+  )
+  
+  #change sampler for Z to an AF slice sampler
+  #mcmc_conf$removeSamplers("Z")
+  #mcmc_conf$addSampler(target="Z",type='AF_slice')
+  
+  nimble_mcmc <- buildMCMC(mcmc_conf)
+  compiled_mcmc <- compileNimble(
+    nimble_mcmc,
+    project = nimble_model,
+    resetFunctions = TRUE
+  )
+  
+  # --- 6 ---
+  #Run samples
+  samples = runMCMC(
+    compiled_mcmc,
+    inits = mod_inits,
+    nchains = 1,
+    nburnin = M.burn,
+    niter = M.iter,
+    samplesAsCodaMCMC = TRUE,
+    thin = M.thin,
+    summary = FALSE,
+    WAIC = FALSE,
+    progressBar = TRUE
+  )
+  
+  time.out <- Sys.time() - st
+  
+  zl = which(colnames(samples) == "Z[1]")
+  zu = which(colnames(samples) == paste("Z[",Tobs,"]",sep=""))
+  bl = which(colnames(samples) == "beta[1]")
+  bu = which(colnames(samples) == paste("beta[",bp,"]",sep=""))
+  rl = which(colnames(samples) == "rho.z")
+  tl = which(colnames(samples) == "tau.z")
+  
+  MCMCout <- list(
+    "Z" = samples[,zl:zu],
+    "sigma.sq" = 1/samples[,tl],
+    "beta" = samples[,bl:bu],
+    "rho.Z"=samples[,rl]
+  )
+  
+  #save output for each stage one posterior in a folder indexed by site ID
+  save(MCMCout, time.out, file = paste("StageOneOutput/MCMCout.",q,".Rda",sep=""))
+}
+```
+
+#### Stage 2
+
+```{r}
+# --- 1 ---
+#Load libs
+library(invgamma)
+library(mvtnorm)
+
+# --- 2 ---
+#load in all samples from the 1-stage model and consolidate the stage 1 output
+load(paste('StageOneOutput/MCMCout.',1,'.Rda',sep=""))
+
+n <- Q
+T <- ncol(MCMCout$Z)
+M <- nrow(MCMCout$Z)
+
+Z.samp <- array(NA,c(n,T,M))
+sigma.sq.samp <- matrix(NA,n,M)
+beta.samp <- array(NA,c(n,dim(MCMCout$beta)[2],M))
+rho.Z.samp <- matrix(NA,n,M)
+
+for(q in 1:n){
+	load(paste('StageOneOutput/MCMCout.',q,'.Rda',sep=""))
+	Z.samp[q,,] = t(MCMCout$Z)
+  sigma.sq.samp[q,] = MCMCout$sigma.sq
+  beta.samp[q,,] = t(MCMCout$beta)
+  rho.Z.samp[q,] = MCMCout$rho.Z
+	rm('MCMCout')
+}
+
+# convert rho.Z to gamma samples
+gamma.samp = log(rho.Z.samp/(1-rho.Z.samp))
+```
+
+```{r}
+# --- 3 ---
+#need to construct adjacency matrix
+#need adjacency matrix for grid cells and number of neighbors of each...
+
+loc <- data[which(data$time==data$time[1]),c("lon","lat")]
+D <- as.matrix(dist(loc))
+A <- 1*(D>0 & D<=sqrt(.5)) ### regular grid; queens adjacency means distances is <= sqrt(0.5)
+numnns <- rowSums(A)
+D <- matrix(0,n,n)
+diag(D) <- numnns
+
+
+# --- 4 ---
+#run the second stage MCMC algorithm
+
+#set initial values
+#take one draw for each site-specific parameter
+Z <- Z.samp[,,M]
+sigma.sq <- sigma.sq.samp[,M]
+beta <- beta.samp[,,M]
+gamma <- gamma.samp[,M]
+
+bp <- dim(beta.samp)[2]
+
+#initial values for overall parameters
+tausq.b <- rep(1,bp)
+tausq.g <- 1
+
+
+#store final draws
+M.iter <- 10000
+M.burn <- 2000
+M.thin <- 5
+M.out <- (M.iter-M.burn)/M.thin
+
+Z.out <- array(NA,c(n,T,M.out))
+sigma.sq.out <- matrix(NA,n,M.out)
+beta.out <- array(NA,c(n,bp,M.out))
+rho.Z.out <- matrix(NA,n,M.out)
+tausq.b.out <- matrix(NA,bp,M.out)
+tausq.g.out <- rep(NA,M.out)
+
+progress_bar <- txtProgressBar(min=0, max=M.iter, style = 3, char="=")
+for(m in 1:M.iter){
+  #update tausq.b for each covariate
+  for(p in 1:bp){
+    tausq.b[p] = rinvgamma(1,0.5+n/2,0.5+1/2*t(beta[,p])%*%(D-A)%*%beta[,p])   #sum((beta[,p]-beta0[p])^2)  )
+  }
+  #update tausq.g
+  tausq.g = rinvgamma(1,0.5+n/2,0.5+1/2*t(gamma)%*%(D-A)%*%gamma)
+  
+  #update the site-specific parameters for each location
+  #update full vector of site-specific parameters jointly
+  for(i in 1:n){
+    mi = sample(1:M,1) #sample a stage 1 draw randomly
+    gamma.new = gamma.samp[i,mi]
+    gammam = 1/numnns[i]*A[i,]%*%gamma #mean of ICAR conditional distribution = average of neighbors
+    betap.new = beta.samp[i,,mi]
+    betam = 1/numnns[i]*A[i,]%*%beta
+    R.new = dnorm(gamma.new,gammam,sd=sqrt(tausq.g/numnns[i]),log=TRUE)+sum(dnorm(betap.new,betam,sqrt(tausq.b/numnns[i]),log=TRUE))-dlogis(gamma.new,0,1,log=TRUE)-sum(dnorm(betap.new,0,sd=3,log=TRUE))
+    R.old = dnorm(gamma[i],gammam,sd=sqrt(tausq.g/numnns[i]),log=TRUE)+sum(dnorm(beta[i,],betam,sqrt(tausq.b/numnns[i]),log=TRUE ))-dlogis(gamma[i],0,1,log=TRUE)-sum(dnorm(beta[i,],0,sd=3,log=TRUE))
+    
+    if(log(runif(1))<(R.new-R.old)){
+      gamma[i] = gamma.new
+      sigma.sq[i] = sigma.sq.samp[i,mi]
+      Z[i,] = Z.samp[i,,mi]
+      beta[i,] = betap.new
+    }
+  }
+  
+  if(m>=M.burn & m/M.thin==floor(m/M.thin)){
+    Z.out[,,(m-M.burn)/M.thin] = Z
+    sigma.sq.out[,(m-M.burn)/M.thin] = sigma.sq
+    beta.out[,,(m-M.burn)/M.thin] = beta
+    rho.Z.out[,(m-M.burn)/M.thin] = exp(gamma)/(1+exp(gamma))
+    tausq.b.out[,(m-M.burn)/M.thin] = tausq.b
+    tausq.g.out[(m-M.burn)/M.thin] = tausq.g
+  }
+  setTxtProgressBar(progress_bar, value = m)
+}
+close(progress_bar)
+time.out <- Sys.time()-st
+
+save(time.out,Z.out,sigma.sq.out,beta.out,rho.Z.out,tausq.b.out,tausq.g.out,file="Stage2Output.Rda")
+```
+
+```{r}
+#Load data and prepare dataset
+load("Stage2Output.Rda")
+avg_beta2 <- apply(beta.out, c(1, 2), mean) #get mean of the posteirors
+
+intercept_avg2 <- avg_beta2[,1]
+evp_avg2 <- avg_beta2[,2]
+soilm_avg2 <- avg_beta2[,3]
+tsoil_avg2 <- avg_beta2[,4]
+```
+
+```{r}
+#Combine intercept and coordinates
+plot_df <- data.frame(
+  lon = coords$lon,
+  lat = coords$lat,
+  intercept = intercept_avg2
+)
+
+#Convert to sf
+plot_sf <- st_as_sf(plot_df, coords = c("lon", "lat"), crs = 4326)
+
+#Plot
+ggplot() +
+  geom_sf(data = plot_sf, aes(color = intercept), size = 7, alpha = 0.8, shape = 15) +
+  scale_color_distiller(
+    palette = "RdBu",
+    direction = -1
+  )+
+  geom_sf(data = az_boundary, fill = NA, color = "black", linewidth = 0.7) +
+  ggtitle("Intercept - Two Stage") +
+  coord_sf(xlim = c(-115, -109), ylim = c(31, 37)) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 14, face = "bold"),
+    legend.position = "right"
+  )
+```
+
+```{r}
+#Combine intercept and coordinates
+plot_df <- data.frame(
+  lon = coords$lon,
+  lat = coords$lat,
+  evp = evp_avg2
+)
+
+#Convert to sf
+plot_sf <- st_as_sf(plot_df, coords = c("lon", "lat"), crs = 4326)
+
+#Plot
+ggplot() +
+  geom_sf(data = plot_sf, aes(color = evp), size = 7, alpha = 0.8, shape = 15) +
+  scale_color_distiller(
+    palette = "RdBu",
+    direction = 1
+  )+
+  geom_sf(data = az_boundary, fill = NA, color = "black", linewidth = 0.7) +
+  ggtitle("Evapotranspiration - Two Stage") +
+  coord_sf(xlim = c(-115, -109), ylim = c(31, 37)) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 14, face = "bold"),
+    legend.position = "right"
+  )
+```
+
+```{r}
+#Combine intercept and coordinates
+plot_df <- data.frame(
+  lon = coords$lon,
+  lat = coords$lat,
+  soilm = soilm_avg2
+)
+
+#Convert to sf
+plot_sf <- st_as_sf(plot_df, coords = c("lon", "lat"), crs = 4326)
+
+#Plot
+ggplot() +
+  geom_sf(data = plot_sf, aes(color = soilm), size = 7, alpha = 0.8, shape = 15) +
+  scale_color_distiller(
+    palette = "RdBu",
+    direction = 1
+  )+
+  geom_sf(data = az_boundary, fill = NA, color = "black", linewidth = 0.7) +
+  ggtitle("Soil Moisture - Two Stage") +
+  coord_sf(xlim = c(-115, -109), ylim = c(31, 37)) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 14, face = "bold"),
+    legend.position = "right"
+  )
+```
+
+```{r}
+#Combine intercept and coordinates
+plot_df <- data.frame(
+  lon = coords$lon,
+  lat = coords$lat,
+  tsoil = tsoil_avg2
+)
+
+#Convert to sf
+plot_sf <- st_as_sf(plot_df, coords = c("lon", "lat"), crs = 4326)
+
+#Plot
+ggplot() +
+  geom_sf(data = plot_sf, aes(color = tsoil), size = 7, alpha = 0.8, shape = 15) +
+  scale_color_distiller(
+    palette = "RdBu",
+    direction = -1
+  )+
+  geom_sf(data = az_boundary, fill = NA, color = "black", linewidth = 0.7) +
+  ggtitle("Soil Temps - Two Stage") +
+  coord_sf(xlim = c(-115, -109), ylim = c(31, 37)) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 14, face = "bold"),
+    legend.position = "right"
+  )
+```
+
+## References
+
+## Appendix
