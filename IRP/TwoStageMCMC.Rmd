@@ -201,7 +201,7 @@ Y_{i,t}\in\{0,1,2,3,4,5\} = \{0, D0, D1, D2, D3, D4\}
 $$ so $\alpha = (-\infty,0,1,2,3,4,\infty)$. The latent (unobserved) continuous drought process is
 
 $$
-Z_{i,t} = \begin{cases}X_{i,t}\boldsymbol{\beta}_i + \epsilon_{i,t}, & \text{for } t = 1 \\[6pt]X_{i,t}\boldsymbol{\beta}_i + \rho_i \big(Z_{i,t-1} - X_{i,t-1}\boldsymbol{\beta}_i\big) + \epsilon_{i,t}, & \text{for } t > 1,\end{cases}
+Z_{i,t} = \begin{cases}X_{i,t}{\beta}_i + \epsilon_{i,t}, & \text{for } t = 1 \\[6pt]X_{i,t}{\beta}_i + \rho_i \big(Z_{i,t-1} - X_{i,t-1}{\beta}_i\big) + \epsilon_{i,t}, & \text{for } t > 1,\end{cases}
 $$
 
 where $X_{i,t}$ is a $(P+1)$-dimensional vector of covariates including the intercept parameter, $\beta_{i} = (\beta_{0i},\ldots,\beta_{Pi})$ is the location specific $(P+1)$-dimensional spatial random effect vector, $\rho_i$ is a spatial dependent autoregressive term, and errors $\epsilon_{i,t}\sim N(0,\sigma_i^2)$. In our example, $P=3$.
@@ -215,13 +215,13 @@ Lastly, all variance parameters $\sigma_i^2, \sigma_\gamma^2, \text{and } \sigma
 Putting this together, the full Bayesian hierarchical model of the spatio-temporal is:
 
 $$
-\begin{aligned}\text{Data Model:} \quad & Y_{1:T} \mid Z_{1:T} \sim f(Y_{1:T} \mid Z_{1:T}), \\[6pt]\text{Process Model:} \quad & Z_{1:T} \mid \boldsymbol{\theta}_Z, X_{1:T} \sim \pi(Z_{1:T} \mid \boldsymbol{\theta}_Z, X_{1:T}), \\[6pt]\text{Prior Models:} \quad & \boldsymbol{\theta}_Z, \boldsymbol{\phi} \sim \pi(\boldsymbol{\theta}_Z \mid \boldsymbol{\phi}) \pi(\boldsymbol{\phi}).\end{aligned}
+\begin{aligned}\text{Data Model:} \quad & Y_{1:T} \mid Z_{1:T} \sim f(Y_{1:T} \mid Z_{1:T}), \\[6pt]\text{Process Model:} \quad & Z_{1:T} \mid {\theta}_Z, X_{1:T} \sim \pi(Z_{1:T} \mid {\theta}_Z, X_{1:T}), \\[6pt]\text{Prior Models:} \quad & {\theta}_Z, {\phi} \sim \pi({\theta}_Z \mid {\phi}) \pi({\phi}).\end{aligned}
 $$
 
 The posterior distribution is:
 
 $$
-\pi(Z_{1:T}, \boldsymbol{\theta}_Z, \boldsymbol{\phi} \mid Y_{1:T}, X_{1:T})\;\propto\;f(Y_{1:T} \mid Z_{1:T})\,\pi(Z_{1:T} \mid \boldsymbol{\theta}_Z, X_{1:T})\,\pi(\boldsymbol{\theta}_Z \mid \boldsymbol{\phi})\,\pi(\boldsymbol{\phi})
+\pi(Z_{1:T}, {\theta}_Z, {\phi} \mid Y_{1:T}, X_{1:T})\;\propto\;f(Y_{1:T} \mid Z_{1:T})\,\pi(Z_{1:T} \mid {\theta}_Z, X_{1:T})\,\pi({\theta}_Z \mid {\phi})\,\pi({\phi})
 $$
 
 For more details, please read chapter 3.1 in Hepler et al.'s paper.
