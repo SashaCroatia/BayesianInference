@@ -1,6 +1,6 @@
 # Introduction to Recursive Bayesian Inference
 
-This repository is a series of R markdown notebooks I made on the study of sequential Monte Carlo (filtering). It's intended for educational purposes.
+R repository I made on the study of sequential Monte Carlo (filtering). It's intended for educational purposes.
 
 ## Usage
 
