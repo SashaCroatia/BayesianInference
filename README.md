@@ -24,11 +24,11 @@ R repository I made on the study of sequential Monte Carlo (filtering). It's int
 <br>
 
 ### References
-1) Hepler et al.: https://arxiv.org/pdf/2505.24594v1
+1) [Hepler et al.](https://arxiv.org/pdf/2505.24594v1)
 
-2) Hooten et al.: https://www.tandfonline.com/doi/pdf/10.1080/00031305.2019.1665584
+2) [Hooten et al.](https://www.tandfonline.com/doi/pdf/10.1080/00031305.2019.1665584)
 
-3) NIMBLE: https://r-nimble.org/
+3) [NIMBLE](https://r-nimble.org/)
 
 
 ## License
