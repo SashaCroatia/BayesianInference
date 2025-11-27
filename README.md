@@ -7,7 +7,7 @@ R repository I made on the study of sequential Monte Carlo (filtering). It's int
 ### Folders
 
 * **IRP**. This folder contains a project where I provide an overview of two-stage MCMC and why it would be advantageous to single-stage MCMC if we're doing Bayesian inference of large spatio-temporal ordinal data. It closely follows the comparisons study in "Two-stage MCMC for Fast Bayesian Inference of Large Spatio-temporal Ordinal Data, with Application to US Drought" by Hepler et al. (2025) [1].
-* **RecursiveBayes** This folder is a prototype R package on recursive Bayesian inference. It allows the user to run prior-recursive and prior-proposal sequential Monte Carlo in a couple lines of code. Test the package by downloading the folder and installing the package "RecursiveBayes" in R.
+* **RecursiveBayes** This folder is a _prototype R package_ on recursive Bayesian inference. It allows the user to run prior-recursive and prior-proposal sequential Monte Carlo in a couple lines of code. Test the package by downloading the folder and installing the package "RecursiveBayes" in R.
 
 ### Notebooks
 
